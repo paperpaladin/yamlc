@@ -1,0 +1,9 @@
+# Named one by one, not by pattern: cq c stages the whole tree, so anything
+# missing from this file goes into the next commit. A Go binary is ELF and
+# the collection's audit rejects it.
+/yamlc
+/yamlc-mut
+/scratch/
+t/corpus/
+t/tmp/
+__pycache__/
