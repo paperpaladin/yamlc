@@ -20,6 +20,8 @@ func main() {
 		os.Exit(2)
 	}
 	switch args[0] {
+	case "check":
+		os.Exit(cmdCheck(args[1:]))
 	default:
 		fmt.Fprintf(os.Stderr, "yamlc: no such command: %s\n", args[0])
 		os.Exit(2)
