@@ -11,6 +11,7 @@ import (
 const usage = `usage: yamlc COMMAND [OPTION]... FILE...
 
   check FILE...      parse each file; print ok, or the refusal with a position
+  events FILE...     the parse as an event stream, for diffing against PyYAML
 `
 
 func main() {
@@ -22,6 +23,8 @@ func main() {
 	switch args[0] {
 	case "check":
 		os.Exit(cmdCheck(args[1:]))
+	case "events":
+		os.Exit(cmdEvents(args[1:]))
 	default:
 		fmt.Fprintf(os.Stderr, "yamlc: no such command: %s\n", args[0])
 		os.Exit(2)

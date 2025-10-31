@@ -70,7 +70,7 @@ status() {
 # doc NAME FMT -- write a document from a printf format string, so that a
 # case can hold an exact byte without a separate file.
 doc() {
-	printf "$2" > "$W/$1"
+	printf '%b' "$2" > "$W/$1"
 	echo "$W/$1"
 }
 
@@ -138,6 +138,32 @@ refuse_only() {
 	esac
 }
 
+# ev NAME FMT -- the event stream must be identical to PyYAML's. This is the
+# structural oracle and it carries no resolution at all: a plain scalar comes
+# out as a plain scalar whatever its content looks like, so a disagreement
+# here is about the grammar and never about a schema.
+ev() {
+	f=$(doc "$1" "$2")
+	a=$(python3 t/pyyaml.py events "$f" 2>/dev/null)
+	b=$($Y events "$f" 2>&1)
+	eq "ev/$1" "$a" "$b"
+}
+
+# ev_diff NAME FMT -- the two event streams must DIFFER, for a reason
+# recorded in the README. Asserting the difference rather than skipping the
+# case means that a divergence which quietly goes away turns the suite red
+# instead of sitting here as a passing exception.
+ev_diff() {
+	f=$(doc "$1" "$2")
+	a=$(python3 t/pyyaml.py events "$f" 2>/dev/null)
+	b=$($Y events "$f" 2>&1)
+	if [ "$a" = "$b" ]; then
+		bad "ev1.2/$1: PyYAML now agrees, so this is no longer a divergence"
+	else
+		ok "ev1.2/$1"
+	fi
+}
+
 status "usage/no-args"      2 $Y
 status "usage/bad-command"  2 $Y nonesuch
 status "usage/check-nofile" 2 $Y check
@@ -146,23 +172,89 @@ status "usage/check-nofile" 2 $Y check
 #
 # c-printable is TAB, LF, CR, #x20-#x7E, #x85, #xA0-#xD7FF, #xE000-#xFFFD
 # and #x10000-#x10FFFF. Anything else is refused with its position.
-accept "plain"      'a: b\n'
-accept "tab-inline" 'a: "x\ty"\n'
-# U+0085 NEL is a printable character in 1.2 and a line break in 1.1, so
-# PyYAML sees two lines here and a key with no colon on the second.
-accept_only "nel"   'a: b\302\205c\n'
-accept "high"       'a: \343\201\202\n'
-accept "bom"        '\357\273\277a: b\n'
-accept "crlf"       'a: b\r\nc: d\r\n'
-accept "cr-only"    'a: b\rc: d\r'
+accept "plain"      'a b\n'
+# A TAB between two plain characters: nb-ns-plain-in-line in section 7.3.3
+# is ( s-white* ns-plain-char )*, so a tab inside a plain scalar is content.
+# PyYAML refuses it outright with "cannot start any token", which is a
+# restriction in that scanner rather than a 1.1 rule.
+accept_only "tab-inline" 'a\tb\n'
+# U+0085 NEL is a printable character in 1.2 and a line break in 1.1. Both
+# readers accept the document and they read different scalars out of it:
+# PyYAML folds the break into a space and gets "a b c".
+accept "nel"        'a b\302\205c\n'
+accept "high"       'a \343\201\202\n'
+accept "bom"        '\357\273\277a b\n'
+accept "crlf"       'a b\r\nc d\r\n'
+accept "cr-only"    'a b\rc d\r'
 
-refuse "bel"        '2:1' 'a: b\n\007c\n'
-refuse "nul"        '1:5' 'a: b\000\n'
-refuse "del"        '1:5' 'a: b\177\n'
-refuse "c1"         '1:5' 'a: b\302\200\n'
+refuse "bel"        '2:1' 'a b\n\007c\n'
+refuse "nul"        '1:4' 'a b\000\n'
+refuse "del"        '1:4' 'a b\177\n'
+refuse "c1"         '1:4' 'a b\302\200\n'
 refuse "bad-utf8"   '1:3' 'ab\303\050\n'
 refuse "trunc-utf8" '1:3' 'ab\303\n'
-refuse "ffff"       '1:5' 'a: b\357\277\277\n'
+refuse "ffff"       '1:4' 'a b\357\277\277\n'
+
+# --- plain scalars and the stream (sections 7.3.3, 6.5, 9.1) -----------
+#
+# Folding, section 6.5: "a single line break is folded into a single
+# space", and "n+1 consecutive breaks are folded into n line feeds".
+ev "plain-one"       'foo\n'
+ev "plain-words"     'foo bar\n'
+ev "plain-fold"      'foo\nbar\n'
+ev "plain-fold-2"    'foo\n\nbar\n'
+ev "plain-fold-3"    'foo\n\n\nbar\n'
+ev "plain-strip"     'foo  \n  bar\n'
+ev "plain-comment"   'foo # c\n'
+ev "plain-dash"      '-foo\n'
+ev "plain-colon"     'a:b\n'
+ev "plain-colons"    'a::b\n'
+ev "plain-question"  '?foo\n'
+ev "plain-indented"  '  foo\n'
+ev "plain-bracket"   'a]b\n'
+ev "empty-stream"    ''
+ev "comment-only"    '# nothing here\n'
+ev "blank-only"      '\n\n\n'
+ev "doc-explicit"    '--- foo\n'
+ev "doc-empty"       '--- \n'
+ev "doc-two"         '--- a\n--- b\n'
+ev "doc-suffix"      'foo\n...\n'
+ev "doc-trailing"    'a\n# tail comment\n'
+ev "anchor"          '&a foo\n'
+ev "alias"           '*a\n'
+ev "tag-secondary"   '!!str foo\n'
+ev "tag-local"       '!foo bar\n'
+ev "tag-verbatim"    '!<tag:example.com,2000:x> y\n'
+ev "tag-nonspecific" '! foo\n'
+ev "tag-percent"     '!<tag:a%2Cb> y\n'
+ev "prop-both"       '&a !!str foo\n'
+ev "prop-both-rev"   '!!str &a foo\n'
+ev "prop-own-line"   '&a\n  foo\n'
+ev "yaml-directive"  '%YAML 1.2\n--- foo\n'
+ev "tag-directive"   '%TAG !e! tag:example.com,2000:\n--- !e!foo x\n'
+ev "tag-primary-dir" '%TAG ! tag:example.com,2000:\n--- !foo x\n'
+ev "reserved-dir"    '%FOO bar baz\n--- x\n'
+
+refuse "dir-no-doc"    '2:1' '%YAML 1.2\nfoo\n'
+refuse "dir-bare-pct"  '1:1' '%\n--- foo\n'
+refuse "tab-indent"    '1:1' '\tfoo\n'
+refuse "unknown-handle" '1:1' '!e!foo x\n'
+refuse "two-anchors"   '1:4' '&a &b x\n'
+refuse "two-tags"      '1:4' '!a !b x\n'
+refuse "anchor-noname" '1:2' '& x\n'
+refuse "verbatim-open" '1:8' '!<tag:x y\n'
+
+# Section 6.8.1: a 1.2 processor must refuse a major version it does not
+# implement. PyYAML accepts any version at all, so this one is ours alone.
+refuse "yaml-2.0"       '1:1' '%YAML 2.0\n--- foo\n'
+refuse "yaml-twice"     '2:1' '%YAML 1.2\n%YAML 1.2\n--- foo\n'
+
+# A bare document after an explicit ... is l-any-document in section 9.2,
+# and PyYAML refuses it.
+accept_only "bare-after-suffix" 'a\n...\nb\n'
+accept_only "suffix-alone"      '...\n'
+ev_diff "bare-after-suffix-ev"  'a\n...\nb\n'
+ev_diff "nel-fold"              'a b\302\205c\n'
 
 echo
 echo "pyyaml $PYYAML"

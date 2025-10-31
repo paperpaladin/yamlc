@@ -37,6 +37,78 @@ def cmd_accept(path):
     return 0
 
 
+def escape(v):
+    """The escaping yamlc's events.go describes. Kept deliberately small:
+    backslash, break and tab go to C escapes, every other control character
+    and every surrogate goes to \\uXXXX, and the rest is raw UTF-8."""
+    out = []
+    for ch in v:
+        o = ord(ch)
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        elif o < 0x20 or o == 0x7F or 0xD800 <= o <= 0xDFFF:
+            out.append("\\u%04X" % o)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+STYLE = {None: ":", "": ":", "'": "'", '"': '"', "|": "|", ">": ">"}
+
+
+def cmd_events(path):
+    yaml = need_yaml()
+    with open(path, "rb") as f:
+        data = f.read()
+    out = []
+    try:
+        for e in yaml.parse(data):
+            n = type(e).__name__
+            if n == "StreamStartEvent":
+                out.append("+STR")
+            elif n == "StreamEndEvent":
+                out.append("-STR")
+            elif n == "DocumentStartEvent":
+                out.append("+DOC ---" if e.explicit else "+DOC")
+            elif n == "DocumentEndEvent":
+                out.append("-DOC ..." if e.explicit else "-DOC")
+            elif n == "ScalarEvent":
+                p = ""
+                if e.anchor:
+                    p += " &" + e.anchor
+                if e.tag:
+                    p += " <" + e.tag + ">"
+                out.append("=VAL%s %s%s" % (p, STYLE[e.style], escape(e.value)))
+            elif n == "AliasEvent":
+                out.append("=ALI *" + e.anchor)
+            elif n in ("SequenceStartEvent", "MappingStartEvent"):
+                k = "+SEQ" if n[0] == "S" else "+MAP"
+                p = ""
+                if e.anchor:
+                    p += " &" + e.anchor
+                if e.tag:
+                    p += " <" + e.tag + ">"
+                if e.flow_style:
+                    p += " []" if k == "+SEQ" else " {}"
+                out.append(k + p)
+            elif n == "SequenceEndEvent":
+                out.append("-SEQ")
+            elif n == "MappingEndEvent":
+                out.append("-MAP")
+    except Exception as e:  # noqa: BLE001
+        sys.stderr.write("refused: %s\n" % type(e).__name__)
+        print("\n".join(out))
+        return 1
+    print("\n".join(out))
+    return 0
+
+
 def cmd_version():
     yaml = need_yaml()
     print(yaml.__version__)
@@ -52,6 +124,8 @@ def main(argv):
         return cmd_version()
     if cmd == "accept":
         return cmd_accept(argv[2])
+    if cmd == "events":
+        return cmd_events(argv[2])
     sys.stderr.write("t/pyyaml.py: no such command: %s\n" % cmd)
     return 2
 

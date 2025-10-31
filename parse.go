@@ -1,0 +1,752 @@
+package main
+
+import (
+	"strings"
+)
+
+// defaultMaxDepth bounds how deeply nested a document may be. A parser is a
+// denial-of-service surface and ten thousand open brackets should be a
+// refusal rather than a stack overflow. Configuration files are not deep;
+// this is well above anything written by hand.
+const defaultMaxDepth = 400
+
+type parser struct {
+	s        *src
+	handles  map[string]string
+	version  string
+	depth    int
+	maxDepth int
+}
+
+// blockCtx is what a block node needs to know about where it sits.
+//
+//	ind      the parent's indentation; content must begin at a column > ind
+//	seqAtInd a block sequence indicator at column == ind is allowed, which
+//	         is the special case that makes "a:\n- 1" valid
+//	inline   the cursor may already be on content on the current line
+//	compact  a block collection may begin on the current line
+//	tabbed   a tab was used as separation before the content, which rules
+//	         out a block collection: s-indent is spaces only
+type blockCtx struct {
+	ind      int
+	seqAtInd bool
+	inline   bool
+	compact  bool
+	tabbed   bool
+}
+
+func isBlank(c byte) bool { return c == ' ' || c == '\t' }
+
+// spaceOrEnd reports whether c can follow a block indicator. The indicators
+// "-", "?" and ":" are only indicators when followed by whitespace or the
+// end of a line, which is why "-foo" and "a:b" are plain scalars.
+func spaceOrEnd(c byte) bool { return isBlank(c) || c == '\n' || c == 0 }
+
+func isFlowIndicator(c byte) bool {
+	return c == ',' || c == '[' || c == ']' || c == '{' || c == '}'
+}
+
+func (p *parser) mark() src   { return *p.s }
+func (p *parser) reset(m src) { *p.s = m }
+func (p *parser) skipBlanks() {
+	for isBlank(p.s.peek(0)) {
+		p.s.next()
+	}
+}
+func (p *parser) skipSpaces() int {
+	n := 0
+	for p.s.peek(0) == ' ' {
+		p.s.next()
+		n++
+	}
+	return n
+}
+
+// atMarker reports whether the cursor sits at column zero on a "---" or
+// "..." line. Those two end a document wherever they appear, which is why
+// every scan that crosses a line break has to ask.
+func (p *parser) atMarker(m string) bool {
+	if p.s.col != 0 {
+		return false
+	}
+	for i := 0; i < 3; i++ {
+		if p.s.peek(i) != m[i] {
+			return false
+		}
+	}
+	return spaceOrEnd(p.s.peek(3))
+}
+
+func (p *parser) atAnyMarker() bool { return p.atMarker("---") || p.atMarker("...") }
+
+// skipLine consumes the rest of the line including its break.
+func (p *parser) skipLine() {
+	for !p.s.eof() && p.s.peek(0) != '\n' {
+		p.s.next()
+	}
+	if p.s.peek(0) == '\n' {
+		p.s.next()
+	}
+}
+
+// endLine consumes blanks, an optional comment and the line break. Anything
+// else on the line is a refusal: a node followed by another token on the
+// same line is not something to guess at.
+func (p *parser) endLine() error {
+	p.skipBlanks()
+	if p.s.peek(0) == '#' {
+		p.skipLine()
+		return nil
+	}
+	if p.s.eof() {
+		return nil
+	}
+	if p.s.peek(0) == '\n' {
+		p.s.next()
+		return nil
+	}
+	return p.s.errf("unexpected %q after a node", p.s.rest())
+}
+
+// atLineEnd reports whether only a comment or the break is left.
+func (p *parser) atLineEnd() bool {
+	return p.s.eof() || p.s.peek(0) == '\n' || p.s.peek(0) == '#'
+}
+
+// skipPrefix consumes blank lines and comment lines, leaving the cursor at
+// column zero of the next line that holds something, or at end of input.
+func (p *parser) skipPrefix() error {
+	for !p.s.eof() {
+		m := p.mark()
+		p.skipSpaces()
+		if p.s.peek(0) == '\t' {
+			k := p.mark()
+			p.skipBlanks()
+			if p.s.peek(0) == '\n' || p.s.eof() {
+				p.skipLine()
+				continue
+			}
+			p.reset(k)
+			return p.s.errf("tab cannot be used for indentation")
+		}
+		switch {
+		case p.s.peek(0) == '\n':
+			p.s.next()
+		case p.s.peek(0) == '#':
+			p.skipLine()
+		case p.s.eof():
+			return nil
+		default:
+			p.reset(m)
+			return nil
+		}
+	}
+	return nil
+}
+
+// toContent positions the cursor on the content of the node being parsed.
+// It returns false when there is none, which means the node is empty: that
+// is e-node in the grammar, and it is extremely common ("a:" with nothing
+// after it).
+func (p *parser) toContent(c *blockCtx) (bool, error) {
+	if c.inline {
+		if p.s.peek(0) == '\t' {
+			c.tabbed = true
+		}
+		p.skipBlanks()
+		if !p.atLineEnd() {
+			return true, nil
+		}
+		if err := p.endLine(); err != nil {
+			return false, err
+		}
+		c.inline = false
+		c.compact = true
+		c.tabbed = false
+	}
+	for {
+		if p.s.eof() {
+			return false, nil
+		}
+		m := p.mark()
+		ind := p.skipSpaces()
+		if p.s.peek(0) == '\t' {
+			k := p.mark()
+			p.skipBlanks()
+			if p.s.peek(0) == '\n' || p.s.eof() {
+				p.skipLine()
+				continue
+			}
+			if ind <= c.ind {
+				p.reset(k)
+				return false, p.s.errf("tab cannot be used for indentation")
+			}
+			p.reset(k)
+			p.skipBlanks()
+			c.tabbed = true
+		}
+		switch {
+		case p.s.peek(0) == '\n':
+			p.s.next()
+			continue
+		case p.s.peek(0) == '#':
+			p.skipLine()
+			continue
+		case p.s.eof():
+			return false, nil
+		}
+		if ind == 0 && p.atAnyMarker() {
+			p.reset(m)
+			return false, nil
+		}
+		okHere := ind > c.ind ||
+			(c.seqAtInd && ind == c.ind && p.s.peek(0) == '-' && spaceOrEnd(p.s.peek(1)))
+		if !okHere {
+			p.reset(m)
+			return false, nil
+		}
+		c.inline = true
+		c.compact = true
+		return true, nil
+	}
+}
+
+func (p *parser) empty() *Node {
+	return &Node{Kind: KScalar, Style: StPlain, Line: p.s.line, Col: p.s.col + 1}
+}
+
+// parseStream reads the whole input. The productions are l-yaml-stream and
+// its children in section 9 of YAML 1.2.2.
+func parseStream(name string, in []byte, maxDepth int) ([]*Document, error) {
+	s, err := newSrc(name, in)
+	if err != nil {
+		return nil, err
+	}
+	if maxDepth <= 0 {
+		maxDepth = defaultMaxDepth
+	}
+	p := &parser{s: s, maxDepth: maxDepth}
+	var docs []*Document
+	needMarker := false
+	for {
+		if err := p.skipPrefix(); err != nil {
+			return nil, err
+		}
+		if p.s.eof() {
+			break
+		}
+		if p.atMarker("...") {
+			p.s.advance(3)
+			if err := p.endLine(); err != nil {
+				return nil, err
+			}
+			if len(docs) > 0 {
+				docs[len(docs)-1].EndMarked = true
+			}
+			needMarker = false
+			continue
+		}
+		d := &Document{Line: p.s.line}
+		p.resetDirectives()
+		if p.s.peek(0) == '%' {
+			if err := p.directives(); err != nil {
+				return nil, err
+			}
+			d.Version = p.version
+			if !p.atMarker("---") {
+				return nil, p.s.errf("a directive must be followed by ---")
+			}
+		}
+		if p.atMarker("---") {
+			p.s.advance(3)
+			d.Explicit = true
+		} else if needMarker {
+			return nil, p.s.errf("a second document in the same stream needs --- before it")
+		}
+		root, err := p.parseBlockNode(blockCtx{ind: -1, inline: d.Explicit, compact: true})
+		if err != nil {
+			return nil, err
+		}
+		d.Root = root
+		docs = append(docs, d)
+		needMarker = true
+	}
+	return docs, nil
+}
+
+func (p *parser) resetDirectives() {
+	p.handles = map[string]string{"!": "!", "!!": "tag:yaml.org,2002:"}
+	p.version = ""
+}
+
+// directives reads the %YAML and %TAG lines before a document.
+//
+// Section 6.8.1 on %YAML: "a version 1.2 processor must refuse a document
+// with a major version other than 1" and should warn, not refuse, on a
+// later minor version.
+func (p *parser) directives() error {
+	seenYAML := false
+	for p.s.col == 0 && p.s.peek(0) == '%' {
+		line, col := p.s.line, p.s.col
+		p.s.next()
+		word := p.word()
+		switch word {
+		case "YAML":
+			if seenYAML {
+				return p.s.errAt(line, col, "two %%YAML directives in one document")
+			}
+			seenYAML = true
+			p.skipBlanks()
+			ver := p.word()
+			major, minor, ok := splitVersion(ver)
+			if !ok {
+				return p.s.errAt(line, col, "%%YAML needs a version like 1.2, got %q", ver)
+			}
+			if major != 1 {
+				return p.s.errAt(line, col, "unsupported YAML version %s: this is a 1.2 processor", ver)
+			}
+			_ = minor
+			p.version = ver
+		case "TAG":
+			p.skipBlanks()
+			h := p.word()
+			if !validHandle(h) {
+				return p.s.errAt(line, col, "%%TAG needs a handle like ! or !!  or !name!, got %q", h)
+			}
+			p.skipBlanks()
+			prefix := p.word()
+			if prefix == "" {
+				return p.s.errAt(line, col, "%%TAG %s has no prefix", h)
+			}
+			if _, dup := p.handles[h]; dup && (h != "!" && h != "!!") {
+				return p.s.errAt(line, col, "handle %s is defined twice", h)
+			}
+			p.handles[h] = unescapeURI(prefix)
+		case "":
+			return p.s.errAt(line, col, "a %% at the start of a line must name a directive")
+		default:
+			// Section 6.8: an unknown directive must be ignored with a
+			// warning, not refused. Reserved directives are how the format
+			// is meant to grow, so the whole line goes unread.
+			for !p.s.eof() && p.s.peek(0) != '\n' {
+				p.s.next()
+			}
+		}
+		if err := p.endLine(); err != nil {
+			return err
+		}
+		if err := p.skipPrefix(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// word reads a run of non-space characters, which is what a directive's
+// fields are.
+func (p *parser) word() string {
+	var b strings.Builder
+	for !p.atLineEnd() && !isBlank(p.s.peek(0)) {
+		b.WriteByte(p.s.peek(0))
+		p.s.next()
+	}
+	return b.String()
+}
+
+func splitVersion(v string) (int, int, bool) {
+	i := strings.IndexByte(v, '.')
+	if i <= 0 || i == len(v)-1 {
+		return 0, 0, false
+	}
+	major, ok1 := atoiAll(v[:i])
+	minor, ok2 := atoiAll(v[i+1:])
+	return major, minor, ok1 && ok2
+}
+
+func atoiAll(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+		n = n*10 + int(s[i]-'0')
+	}
+	return n, true
+}
+
+func validHandle(h string) bool {
+	if h == "!" || h == "!!" {
+		return true
+	}
+	if len(h) < 3 || h[0] != '!' || h[len(h)-1] != '!' {
+		return false
+	}
+	for i := 1; i < len(h)-1; i++ {
+		if !isWordChar(h[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isWordChar(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '-'
+}
+
+func hexVal(c byte) (int, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0'), true
+	case c >= 'a' && c <= 'f':
+		return int(c-'a') + 10, true
+	case c >= 'A' && c <= 'F':
+		return int(c-'A') + 10, true
+	}
+	return 0, false
+}
+
+// unescapeURI turns %XX back into bytes. Section 6.9.1: a tag shorthand's
+// suffix may carry percent escapes, and a tag that is compared without
+// decoding them is a different tag.
+func unescapeURI(s string) string {
+	if !strings.ContainsRune(s, '%') {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] == '%' && i+2 < len(s) {
+			h1, ok1 := hexVal(s[i+1])
+			h2, ok2 := hexVal(s[i+2])
+			if ok1 && ok2 {
+				b.WriteByte(byte(h1<<4 | h2))
+				i += 3
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// parseBlockNode is the dispatch for block context. Properties come first
+// and may sit on their own line, then exactly one of the node forms.
+func (p *parser) parseBlockNode(c blockCtx) (*Node, error) {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > p.maxDepth {
+		return nil, p.s.errf("nesting deeper than %d, refused", p.maxDepth)
+	}
+	found, err := p.toContent(&c)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return p.empty(), nil
+	}
+	line, col := p.s.line, p.s.col
+	anchor, tag, tagRaw := "", "", ""
+	for p.s.peek(0) == '&' || p.s.peek(0) == '!' {
+		if p.s.peek(0) == '&' {
+			if anchor != "" {
+				return nil, p.s.errf("a node can carry only one anchor")
+			}
+			if anchor, err = p.readAnchor(); err != nil {
+				return nil, err
+			}
+		} else {
+			if tagRaw != "" {
+				return nil, p.s.errf("a node can carry only one tag")
+			}
+			if tag, tagRaw, err = p.readTag(); err != nil {
+				return nil, err
+			}
+		}
+		if !isBlank(p.s.peek(0)) && !p.atLineEnd() {
+			return nil, p.s.errf("a property must be followed by a space")
+		}
+		found, err = p.toContent(&c)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			n := p.empty()
+			n.Anchor, n.Tag, n.TagRaw = anchor, tag, tagRaw
+			n.Line, n.Col = line, col+1
+			return n, nil
+		}
+	}
+	n, err := p.blockContent(c, anchor, tag, tagRaw, line, col)
+	if err != nil {
+		return nil, err
+	}
+	return n, nil
+}
+
+func (p *parser) blockContent(c blockCtx, anchor, tag, tagRaw string, line, col int) (*Node, error) {
+	ch := p.s.peek(0)
+	n := &Node{Kind: KScalar, Anchor: anchor, Tag: tag, TagRaw: tagRaw, Line: line, Col: col + 1}
+	switch {
+	case ch == '*':
+		a, err := p.readAlias()
+		if err != nil {
+			return nil, err
+		}
+		if anchor != "" || tagRaw != "" {
+			return nil, p.s.errf("an alias cannot carry an anchor or a tag")
+		}
+		n.Kind, n.Alias = KAlias, a
+		if err := p.endLine(); err != nil {
+			return nil, err
+		}
+		return n, nil
+	case ch == '\'' || ch == '"' || ch == '|' || ch == '>' || ch == '[' || ch == '{' ||
+		(ch == '-' && spaceOrEnd(p.s.peek(1))) ||
+		(ch == '?' && spaceOrEnd(p.s.peek(1))) ||
+		(ch == ':' && spaceOrEnd(p.s.peek(1))):
+		return nil, p.s.errf("yamlc: not implemented: %q", p.s.rest())
+	}
+	v, _, err := p.scanPlain(c.ind, false)
+	if err != nil {
+		return nil, err
+	}
+	n.Val = v
+	if err := p.endLine(); err != nil {
+		return nil, err
+	}
+	return n, nil
+}
+
+// plainFirst reports whether a plain scalar may begin with this character.
+// Section 7.3.3: ns-plain-first excludes every indicator, except that "-",
+// "?" and ":" are allowed when what follows them is not whitespace, which
+// is why "-foo" and ":x" are scalars and "- foo" is a sequence entry.
+func plainFirst(c, next byte, flow bool) bool {
+	switch c {
+	case 0, '\n', ' ', '\t':
+		return false
+	case ',', '[', ']', '{', '}':
+		return !flow
+	case '#', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`':
+		return false
+	case '-', '?', ':':
+		return !spaceOrEnd(next) && !(flow && isFlowIndicator(next))
+	}
+	return true
+}
+
+// scanPlain reads a plain scalar, following it onto later lines while they
+// are indented more than ind. It returns the folded value and whether the
+// scalar spanned more than one line, which the caller needs because an
+// implicit mapping key has to be on one line.
+//
+// Section 7.3.3 and section 6.5 on folding: a single line break between
+// two non-empty lines becomes a space, and n+1 consecutive breaks become n
+// line feeds.
+func (p *parser) scanPlain(ind int, flow bool) (string, bool, error) {
+	if !plainFirst(p.s.peek(0), p.s.peek(1), flow) {
+		return "", false, p.s.errf("%q cannot begin a plain scalar", string(p.s.peek(0)))
+	}
+	var out []byte
+	multi := false
+	readLine := func() {
+		var line []byte
+		trail := 0 // trailing blanks, dropped unless more content follows
+		for {
+			c := p.s.peek(0)
+			if c == 0 || c == '\n' {
+				break
+			}
+			if c == ':' {
+				nx := p.s.peek(1)
+				if spaceOrEnd(nx) || (flow && isFlowIndicator(nx)) {
+					break
+				}
+			}
+			if c == '#' && len(line) > 0 && isBlank(line[len(line)-1]) {
+				break
+			}
+			if flow && isFlowIndicator(c) {
+				break
+			}
+			if isBlank(c) {
+				trail++
+			} else {
+				trail = 0
+			}
+			st := p.s.pos
+			p.s.next()
+			line = append(line, p.s.b[st:p.s.pos]...)
+		}
+		out = append(out, line[:len(line)-trail]...)
+	}
+	readLine()
+	for {
+		if p.s.peek(0) != '\n' {
+			break
+		}
+		m := p.mark()
+		breaks, ind2, ok, err := p.foldBreaks(ind)
+		if err != nil {
+			return "", false, err
+		}
+		if !ok || ind2 <= ind || (ind2 == 0 && p.atAnyMarker()) || p.s.peek(0) == '#' {
+			p.reset(m)
+			break
+		}
+		multi = true
+		if breaks == 1 {
+			out = append(out, ' ')
+		} else {
+			out = append(out, strings.Repeat("\n", breaks-1)...)
+		}
+		readLine()
+	}
+	return string(out), multi, nil
+}
+
+// foldBreaks consumes one or more line breaks and the blank lines between
+// them, stopping at the first line that holds content. It returns how many
+// breaks it crossed and the indentation of that line. ok is false at end of
+// input.
+func (p *parser) foldBreaks(ind int) (breaks int, ind2 int, ok bool, err error) {
+	for {
+		if p.s.peek(0) != '\n' {
+			return breaks, ind2, false, nil
+		}
+		p.s.next()
+		breaks++
+		ind2 = p.skipSpaces()
+		c := p.s.peek(0)
+		if c == '\t' {
+			k := p.mark()
+			p.skipBlanks()
+			if p.s.peek(0) == '\n' {
+				continue
+			}
+			if p.s.eof() {
+				return breaks, ind2, false, nil
+			}
+			if ind2 <= ind {
+				p.reset(k)
+				return 0, 0, false, p.s.errf("tab cannot be used for indentation")
+			}
+			p.reset(k)
+			p.skipBlanks()
+			return breaks, ind2, true, nil
+		}
+		if c == '\n' {
+			continue
+		}
+		if c == 0 {
+			return breaks, ind2, false, nil
+		}
+		return breaks, ind2, true, nil
+	}
+}
+
+// readAnchor reads "&name". Section 7.1: an anchor name is one or more
+// ns-anchor-char, which is any non-space character that is not a flow
+// indicator.
+func (p *parser) readAnchor() (string, error) {
+	p.s.next()
+	name := p.anchorName()
+	if name == "" {
+		return "", p.s.errf("an anchor needs a name")
+	}
+	return name, nil
+}
+
+func (p *parser) readAlias() (string, error) {
+	p.s.next()
+	name := p.anchorName()
+	if name == "" {
+		return "", p.s.errf("an alias needs a name")
+	}
+	return name, nil
+}
+
+func (p *parser) anchorName() string {
+	var b strings.Builder
+	for {
+		c := p.s.peek(0)
+		if c == 0 || c == '\n' || isBlank(c) || isFlowIndicator(c) {
+			break
+		}
+		st := p.s.pos
+		p.s.next()
+		b.Write(p.s.b[st:p.s.pos])
+	}
+	return b.String()
+}
+
+// readTag reads one of the four forms of section 6.9.1 and 7.1: the
+// non-specific tag "!", a verbatim tag "!<uri>", a shorthand on a named or
+// secondary handle, and a shorthand on the primary handle. It returns the
+// resolved tag and the text as written, because the report wants both.
+func (p *parser) readTag() (string, string, error) {
+	start := p.s.pos
+	tline, tcol := p.s.line, p.s.col
+	p.s.next()
+	if p.s.peek(0) == '<' {
+		p.s.next()
+		var b strings.Builder
+		for {
+			c := p.s.peek(0)
+			if c == '>' {
+				break
+			}
+			if c == 0 || c == '\n' || isBlank(c) {
+				return "", "", p.s.errf("a verbatim tag needs a closing >")
+			}
+			st := p.s.pos
+			p.s.next()
+			b.Write(p.s.b[st:p.s.pos])
+		}
+		p.s.next()
+		if b.Len() == 0 {
+			return "", "", p.s.errf("a verbatim tag cannot be empty")
+		}
+		return unescapeURI(b.String()), string(p.s.b[start:p.s.pos]), nil
+	}
+	// Read the rest, which is either handle!suffix or just a suffix. The
+	// characters allowed in a suffix exclude the flow indicators, so a tag
+	// inside a flow collection ends where the collection's syntax resumes.
+	var raw strings.Builder
+	for {
+		c := p.s.peek(0)
+		if c == 0 || c == '\n' || isBlank(c) || isFlowIndicator(c) {
+			break
+		}
+		st := p.s.pos
+		p.s.next()
+		raw.Write(p.s.b[st:p.s.pos])
+	}
+	body := raw.String()
+	written := "!" + body
+	if body == "" {
+		// The non-specific tag. It means "this node is not a string by
+		// resolution, it is whatever the kind says", and in 1.2 it stops
+		// plain scalar resolution.
+		return "!", "!", nil
+	}
+	handle, suffix := "!", body
+	if i := strings.IndexByte(body, '!'); i >= 0 {
+		if i == 0 {
+			handle, suffix = "!!", body[1:]
+		} else {
+			handle, suffix = "!"+body[:i]+"!", body[i+1:]
+		}
+	}
+	prefix, known := p.handles[handle]
+	if !known {
+		return "", "", p.s.errAt(tline, tcol, "tag handle %s was never declared with %%TAG", handle)
+	}
+	if suffix == "" {
+		return "", "", p.s.errAt(tline, tcol, "tag %s has no suffix", written)
+	}
+	return prefix + unescapeURI(suffix), written, nil
+}

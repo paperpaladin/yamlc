@@ -28,7 +28,7 @@ func cmdCheck(args []string) int {
 			bad++
 			continue
 		}
-		if _, err := newSrc(name, raw); err != nil {
+		if _, err := parseStream(name, raw, 0); err != nil {
 			fmt.Println(err)
 			bad++
 			continue
