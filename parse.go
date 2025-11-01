@@ -503,7 +503,25 @@ func (p *parser) blockContent(c blockCtx, anchor, tag, tagRaw string, line, col 
 			return nil, err
 		}
 		return n, nil
-	case ch == '\'' || ch == '"' || ch == '|' || ch == '>' || ch == '[' || ch == '{' ||
+	case ch == '\'' || ch == '"':
+		var v string
+		var err error
+		if ch == '\'' {
+			n.Style = StSingle
+			v, _, err = p.scanSingle(c.ind)
+		} else {
+			n.Style = StDouble
+			v, _, err = p.scanDouble(c.ind)
+		}
+		if err != nil {
+			return nil, err
+		}
+		n.Val = v
+		if err := p.endLine(); err != nil {
+			return nil, err
+		}
+		return n, nil
+	case ch == '|' || ch == '>' || ch == '[' || ch == '{' ||
 		(ch == '-' && spaceOrEnd(p.s.peek(1))) ||
 		(ch == '?' && spaceOrEnd(p.s.peek(1))) ||
 		(ch == ':' && spaceOrEnd(p.s.peek(1))):

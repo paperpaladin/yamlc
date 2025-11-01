@@ -235,6 +235,41 @@ ev "tag-directive"   '%TAG !e! tag:example.com,2000:\n--- !e!foo x\n'
 ev "tag-primary-dir" '%TAG ! tag:example.com,2000:\n--- !foo x\n'
 ev "reserved-dir"    '%FOO bar baz\n--- x\n'
 
+# --- quoted scalars (sections 7.3.1, 7.3.2, 5.7) -----------------------
+ev "sq-simple"       "'abc'\n"
+ev "sq-escape"       "'it''s'\n"
+ev "sq-empty"        "''\n"
+ev "sq-fold"         "'x\n  y'\n"
+ev "sq-fold-blank"   "'x\n\n  y'\n"
+ev "sq-trailing-ws"  "'x  \n  y'\n"
+ev "sq-hash"         "'a # b'\n"
+ev "sq-colon"        "'a: b'\n"
+ev "dq-simple"       '"abc"\n'
+ev "dq-empty"        '""\n'
+ev "dq-tab"          '"a\\tb"\n'
+ev "dq-escapes"      '"\\0\\a\\b\\t\\n\\v\\f\\r\\e\\ \\"\\/\\\\"\n'
+ev "dq-named"        '"\\N\\_\\L\\P"\n'
+ev "dq-hex"          '"\\x41\\xe9"\n'
+ev "dq-u16"          '"\\u00e9\\u20ac"\n'
+ev "dq-u32"          '"\\U0001F600"\n'
+ev "dq-lone-surr"    '"\\ud800"\n'
+ev "dq-fold"         '"x\n  y"\n'
+ev "dq-escaped-nl"   '"a\\\nb"\n'
+ev "dq-escaped-nl-blank" '"a\\\n\n  b"\n'
+ev "dq-real-tab"     '"a\tb"\n'
+
+# PyYAML does not join a surrogate pair: it produces two lone surrogates
+# where yamlc produces U+1F600. Python's json joins the pair, and the JSON
+# subset is where this project is not allowed to differ, so yamlc follows
+# json here. YAML 1.2 defines no escape for a surrogate at all.
+ev_diff "dq-surrogate-pair" '"\\ud83d\\ude00"\n'
+
+refuse "sq-unclosed"   '1:1' "'abc\n"
+refuse "dq-unclosed"   '1:1' '"abc\n'
+refuse "dq-bad-escape" '1:3' '"a\\qb"\n'
+refuse "dq-short-hex"  '1:3' '"a\\x4"\n'
+refuse "dq-short-u"    '1:3' '"a\\u00"\n'
+
 refuse "dir-no-doc"    '2:1' '%YAML 1.2\nfoo\n'
 refuse "dir-bare-pct"  '1:1' '%\n--- foo\n'
 refuse "tab-indent"    '1:1' '\tfoo\n'
