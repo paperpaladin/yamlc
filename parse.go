@@ -521,7 +521,19 @@ func (p *parser) blockContent(c blockCtx, anchor, tag, tagRaw string, line, col 
 			return nil, err
 		}
 		return n, nil
-	case ch == '|' || ch == '>' || ch == '[' || ch == '{' ||
+	case ch == '|' || ch == '>':
+		if ch == '|' {
+			n.Style = StLiteral
+		} else {
+			n.Style = StFolded
+		}
+		v, err := p.scanBlockScalar(c.ind, n.Style)
+		if err != nil {
+			return nil, err
+		}
+		n.Val = v
+		return n, nil
+	case ch == '[' || ch == '{' ||
 		(ch == '-' && spaceOrEnd(p.s.peek(1))) ||
 		(ch == '?' && spaceOrEnd(p.s.peek(1))) ||
 		(ch == ':' && spaceOrEnd(p.s.peek(1))):

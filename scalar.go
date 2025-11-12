@@ -236,3 +236,175 @@ func (p *parser) hexDigits(n, line, col int) (int, error) {
 	}
 	return v, nil
 }
+
+// scanBlockScalar reads a literal or folded block scalar, sections 8.1.2
+// and 8.1.3. The cursor sits on the | or > indicator.
+//
+// The indentation may be given (|2) or detected from the first non-empty
+// line, and the chomping indicator decides what happens to the trailing
+// line breaks: clip keeps one, strip keeps none, keep keeps all of them.
+//
+// The folding rule in 8.1.3 is the one implementations differ on. A break
+// between two lines that both begin with content folds to a space; a break
+// next to a more-indented line, or next to a blank line, stays a break. The
+// structure here follows PyYAML's reading of it, which PyYAML's own comment
+// calls ambiguous and which the comparison in t/run.sh holds it to.
+func (p *parser) scanBlockScalar(ind int, style Style) (string, error) {
+	folded := style == StFolded
+	sline, scol := p.s.line, p.s.col
+	p.s.next()
+	chomp, incr, err := p.blockIndicators(sline, scol)
+	if err != nil {
+		return "", err
+	}
+	p.skipBlanks()
+	if !p.atLineEnd() {
+		return "", p.s.errf("a block scalar header takes only a comment, not %q", p.s.rest())
+	}
+	if err := p.endLine(); err != nil {
+		return "", err
+	}
+
+	// Section 8.1.1.1: the indentation indicator is relative to the parent
+	// node, and a node at the top of a document has none, so the floor is
+	// one space.
+	minIndent := ind + 1
+	if minIndent < 1 {
+		minIndent = 1
+	}
+	var out []byte
+	var breaks []byte
+	indent := 0
+	lineStart := p.mark()
+	if incr == 0 {
+		var content, maxEmpty int
+		var deepest src
+		breaks, content, maxEmpty, lineStart, deepest = p.blockIndentation()
+		indent = minIndent
+		if content > indent {
+			indent = content
+		}
+		// Section 8.1.1.1: "it is an error for any of the leading empty
+		// lines to contain more spaces than the first non-empty line".
+		if maxEmpty > indent {
+			p.reset(deepest)
+			return "", p.s.errf("a leading empty line of this block scalar is indented more than its first content line")
+		}
+	} else {
+		indent = minIndent + incr - 1
+		breaks, lineStart = p.blockBreaks(indent)
+	}
+
+	lineBreak := ""
+	for p.s.col == indent && !p.s.eof() {
+		out = append(out, breaks...)
+		leadingText := !isBlank(p.s.peek(0))
+		for !p.s.eof() && p.s.peek(0) != '\n' {
+			st := p.s.pos
+			p.s.next()
+			out = append(out, p.s.b[st:p.s.pos]...)
+		}
+		if p.s.peek(0) == '\n' {
+			lineBreak = "\n"
+			p.s.next()
+		} else {
+			lineBreak = ""
+		}
+		breaks, lineStart = p.blockBreaks(indent)
+		if p.s.col != indent || p.s.eof() {
+			break
+		}
+		if folded && lineBreak == "\n" && leadingText && !isBlank(p.s.peek(0)) {
+			if len(breaks) == 0 {
+				out = append(out, ' ')
+			}
+		} else {
+			out = append(out, lineBreak...)
+		}
+	}
+	p.reset(lineStart)
+	if chomp >= 0 {
+		out = append(out, lineBreak...)
+	}
+	if chomp > 0 {
+		out = append(out, breaks...)
+	}
+	return string(out), nil
+}
+
+// blockIndicators reads the chomping and indentation indicators, in either
+// order. Section 8.1.1: the indentation indicator is a digit 1 to 9, so a
+// zero is a refusal rather than a default.
+func (p *parser) blockIndicators(line, col int) (chomp, incr int, err error) {
+	for i := 0; i < 2; i++ {
+		c := p.s.peek(0)
+		switch {
+		case c == '+' || c == '-':
+			if chomp != 0 {
+				return 0, 0, p.s.errf("two chomping indicators on one block scalar")
+			}
+			if c == '+' {
+				chomp = 1
+			} else {
+				chomp = -1
+			}
+			p.s.next()
+		case c >= '0' && c <= '9':
+			if incr != 0 {
+				return 0, 0, p.s.errf("two indentation indicators on one block scalar")
+			}
+			if c == '0' {
+				return 0, 0, p.s.errf("a block scalar's indentation indicator is 1 to 9, not 0")
+			}
+			incr = int(c - '0')
+			p.s.next()
+		default:
+			return chomp, incr, nil
+		}
+	}
+	return chomp, incr, nil
+}
+
+// blockIndentation consumes the leading empty lines of a block scalar whose
+// indentation was not given, and reports the indentation of the first line
+// with content on it. A tab ends the scan rather than refusing: once the
+// indentation has been counted the tab is content.
+func (p *parser) blockIndentation() (breaks []byte, content, maxEmpty int, lineStart, deepest src) {
+	lineStart = p.mark()
+	for {
+		here := p.mark()
+		n := p.skipSpaces()
+		if p.s.peek(0) == '\n' {
+			if n > maxEmpty {
+				maxEmpty = n
+				deepest = here
+			}
+			breaks = append(breaks, '\n')
+			p.s.next()
+			lineStart = p.mark()
+			continue
+		}
+		return breaks, n, maxEmpty, lineStart, deepest
+	}
+}
+
+// blockBreaks consumes the empty lines after a content line, along with up
+// to indent spaces of the line that follows them. It returns a mark at the
+// start of that line so that the caller can put the cursor back: a block
+// scalar must leave the cursor at column zero or the enclosing collection
+// measures the wrong indentation.
+func (p *parser) blockBreaks(indent int) (breaks []byte, lineStart src) {
+	lineStart = p.mark()
+	for p.s.col < indent && p.s.peek(0) == ' ' {
+		p.s.next()
+	}
+	for p.s.peek(0) == '\n' {
+		breaks = append(breaks, '\n')
+		p.s.next()
+		lineStart = p.mark()
+		for p.s.col < indent && p.s.peek(0) == ' ' {
+			p.s.next()
+		}
+	}
+	return breaks, lineStart
+}
