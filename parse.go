@@ -33,6 +33,9 @@ type blockCtx struct {
 	inline   bool
 	compact  bool
 	tabbed   bool
+	// afterProps: an anchor or tag was read on this same line, which rules
+	// out a block collection
+	afterProps bool
 }
 
 func isBlank(c byte) bool { return c == ' ' || c == '\t' }
@@ -261,7 +264,7 @@ func parseStream(name string, in []byte, maxDepth int) ([]*Document, error) {
 			p.s.advance(3)
 			d.Explicit = true
 		} else if needMarker {
-			return nil, p.s.errf("a second document in the same stream needs --- before it")
+			return nil, p.s.errf("expected --- or ... before this: the stream is already in a document")
 		}
 		root, err := p.parseBlockNode(blockCtx{ind: -1, inline: d.Explicit, compact: true})
 		if err != nil {
@@ -468,10 +471,12 @@ func (p *parser) parseBlockNode(c blockCtx) (*Node, error) {
 		if !isBlank(p.s.peek(0)) && !p.atLineEnd() {
 			return nil, p.s.errf("a property must be followed by a space")
 		}
+		propLine := p.s.line
 		found, err = p.toContent(&c)
 		if err != nil {
 			return nil, err
 		}
+		c.afterProps = found && p.s.line == propLine
 		if !found {
 			n := p.empty()
 			n.Anchor, n.Tag, n.TagRaw = anchor, tag, tagRaw
@@ -488,39 +493,50 @@ func (p *parser) parseBlockNode(c blockCtx) (*Node, error) {
 
 func (p *parser) blockContent(c blockCtx, anchor, tag, tagRaw string, line, col int) (*Node, error) {
 	ch := p.s.peek(0)
+	here := p.s.col
 	n := &Node{Kind: KScalar, Anchor: anchor, Tag: tag, TagRaw: tagRaw, Line: line, Col: col + 1}
+	// A block collection after inline properties is not a production:
+	// s-l+block-collection puts s-l-comments between the properties and the
+	// collection, so the indicator has to be on a later line.
+	blockOK := func(what string) error {
+		if c.tabbed {
+			return p.s.errf("a tab cannot stand before a %s indicator: indentation is spaces only", what)
+		}
+		if !c.compact {
+			return p.s.errf("a %s cannot begin on the same line as the value it belongs to", what)
+		}
+		return nil
+	}
+	// An indicator form on the same line as its own properties is not a
+	// production: s-l+block-collection puts s-l-comments between the
+	// properties and the collection. An implicit key is different, because
+	// it is a ns-flow-yaml-node and may carry properties, so "&a b: c" is
+	// fine while "&a - b" is not.
+	indicatorOK := func(what string) error {
+		if err := blockOK(what); err != nil {
+			return err
+		}
+		if c.afterProps {
+			return p.s.errf("a %s cannot begin on the same line as the anchor or tag it carries", what)
+		}
+		return nil
+	}
 	switch {
-	case ch == '*':
-		a, err := p.readAlias()
-		if err != nil {
+	case ch == '-' && spaceOrEnd(p.s.peek(1)):
+		if err := indicatorOK("block sequence"); err != nil {
 			return nil, err
 		}
-		if anchor != "" || tagRaw != "" {
-			return nil, p.s.errf("an alias cannot carry an anchor or a tag")
-		}
-		n.Kind, n.Alias = KAlias, a
-		if err := p.endLine(); err != nil {
+		return p.parseBlockSeq(here, n)
+	case ch == '?' && spaceOrEnd(p.s.peek(1)):
+		if err := indicatorOK("block mapping"); err != nil {
 			return nil, err
 		}
-		return n, nil
-	case ch == '\'' || ch == '"':
-		var v string
-		var err error
-		if ch == '\'' {
-			n.Style = StSingle
-			v, _, err = p.scanSingle(c.ind)
-		} else {
-			n.Style = StDouble
-			v, _, err = p.scanDouble(c.ind)
-		}
-		if err != nil {
+		return p.parseBlockMap(here, nil, n)
+	case ch == ':' && spaceOrEnd(p.s.peek(1)):
+		if err := indicatorOK("block mapping"); err != nil {
 			return nil, err
 		}
-		n.Val = v
-		if err := p.endLine(); err != nil {
-			return nil, err
-		}
-		return n, nil
+		return p.parseBlockMap(here, p.empty(), n)
 	case ch == '|' || ch == '>':
 		if ch == '|' {
 			n.Style = StLiteral
@@ -533,17 +549,43 @@ func (p *parser) blockContent(c blockCtx, anchor, tag, tagRaw string, line, col 
 		}
 		n.Val = v
 		return n, nil
-	case ch == '[' || ch == '{' ||
-		(ch == '-' && spaceOrEnd(p.s.peek(1))) ||
-		(ch == '?' && spaceOrEnd(p.s.peek(1))) ||
-		(ch == ':' && spaceOrEnd(p.s.peek(1))):
-		return nil, p.s.errf("yamlc: not implemented: %q", p.s.rest())
 	}
-	v, _, err := p.scanPlain(c.ind, false)
+	multi, err := p.inlineNode(n, c.ind)
 	if err != nil {
 		return nil, err
 	}
-	n.Val = v
+	// A ":" here turns what was just read into the first key of a block
+	// mapping. After a quoted scalar or a flow collection it needs no
+	// space after it, which is c-s-implicit-json-key in section 7.4.2 and
+	// the reason {"a":1} parses.
+	p.skipBlanks()
+	jsonLike := n.Style == StSingle || n.Style == StDouble || n.Kind == KSeq || n.Kind == KMap
+	if p.s.peek(0) == ':' && (jsonLike || spaceOrEnd(p.s.peek(1))) {
+		if multi {
+			return nil, p.s.errAt(line, col, "a mapping key written like this must be on one line")
+		}
+		if err := blockOK("block mapping"); err != nil {
+			return nil, err
+		}
+		// Whose properties were they? An anchor on the same line as the
+		// key belongs to the key, because an implicit key is a
+		// ns-flow-yaml-node and may carry properties. An anchor on an
+		// earlier line went through s-l+block-collection and belongs to
+		// the mapping. "a: &x\n  b: 1" anchors the inner mapping, not "b".
+		mapInd := here
+		m := &Node{Kind: KMap, Line: line, Col: col + 1}
+		if c.afterProps {
+			mapInd = col
+		} else {
+			m.Anchor, m.Tag, m.TagRaw = n.Anchor, n.Tag, n.TagRaw
+			n.Anchor, n.Tag, n.TagRaw = "", "", ""
+			m.Line, m.Col = n.Line, n.Col
+		}
+		return p.parseBlockMap(mapInd, n, m)
+	}
+	if n.Kind == KAlias && (anchor != "" || tagRaw != "") {
+		return nil, p.s.errAt(line, col, "an alias cannot carry an anchor or a tag")
+	}
 	if err := p.endLine(); err != nil {
 		return nil, err
 	}
@@ -780,3 +822,5 @@ func (p *parser) readTag() (string, string, error) {
 	}
 	return prefix + unescapeURI(suffix), written, nil
 }
+
+// parseFlow is written in flow.go.
