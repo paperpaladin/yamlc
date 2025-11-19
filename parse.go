@@ -665,7 +665,7 @@ func (p *parser) scanPlain(ind int, flow bool) (string, bool, error) {
 		if err != nil {
 			return "", false, err
 		}
-		if !ok || ind2 <= ind || (ind2 == 0 && p.atAnyMarker()) || p.s.peek(0) == '#' {
+		if !ok || ind2 <= ind || (ind2 == 0 && p.atAnyMarker()) || !p.plainContinues(flow) {
 			p.reset(m)
 			break
 		}
@@ -678,6 +678,26 @@ func (p *parser) scanPlain(ind int, flow bool) (string, bool, error) {
 		readLine()
 	}
 	return string(out), multi, nil
+}
+
+// plainContinues reports whether the character at the cursor can begin a
+// continuation line of a plain scalar. s-ns-plain-next-line requires an
+// ns-plain-char there, so a flow indicator ends the scalar in flow context
+// and a "#" or a ":" followed by space ends it in either. Without this a
+// flow sequence written over several lines gains a trailing space: the "]"
+// on its own line looked like a continuation and folded the break into one.
+func (p *parser) plainContinues(flow bool) bool {
+	c := p.s.peek(0)
+	if c == '#' {
+		return false
+	}
+	if flow && isFlowIndicator(c) {
+		return false
+	}
+	if c == ':' && (spaceOrEnd(p.s.peek(1)) || (flow && isFlowIndicator(p.s.peek(1)))) {
+		return false
+	}
+	return true
 }
 
 // foldBreaks consumes one or more line breaks and the blank lines between

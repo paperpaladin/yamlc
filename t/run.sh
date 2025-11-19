@@ -368,6 +368,56 @@ refuse "blk-less-indent"  '3:2' 'a: |\n  x\n y\n'
 refuse "seq-then-deeper"  '1:6' '- a: 1\n   b: 2\n'
 refuse "key-multiline"    '1:4' 'a: b\n  c: 1\n'
 
+# --- flow collections (section 7.4), which is also the JSON subset ----
+ev "flow-seq"        '[1,2]\n'
+ev "flow-map"        '{a: 1}\n'
+ev "flow-json"       '{"a":1}\n'
+ev "flow-seq-empty"  '[]\n'
+ev "flow-map-empty"  '{}\n'
+ev "flow-nested"     '[a, [b, [c]]]\n'
+ev "flow-nest-empty" '[[[]]]\n'
+ev "flow-seq-trail"  '[1, 2,]\n'
+ev "flow-map-trail"  '{a: b,}\n'
+ev "flow-pair-in-seq" '[a: b]\n'
+ev "flow-explicit"   '{? a}\n'
+ev "flow-explicit-v" '{? a: b}\n'
+ev "flow-bare-key"   '{a}\n'
+ev "flow-empty-val"  '{a: }\n'
+ev "flow-colon-in"   '[a:b]\n'
+ev "flow-colon-map"  '{a:b}\n'
+ev "flow-over-lines" 'a: [1,\n2]\n'
+ev "flow-multiline"  '[\n  1,\n  2\n]\n'
+ev "flow-comment"    '[a, # why\n b]\n'
+ev "flow-seq-key"    '[1,2]: x\n'
+ev "flow-map-key"    '{a: 1}: x\n'
+ev "flow-key-explicit" '? [a]\n: b\n'
+ev "flow-anchor-null" '[&a, b]\n'
+ev "flow-anchor"     '[&a 1, *a]\n'
+ev "flow-tag"        '[!!str a]\n'
+ev "flow-in-map"     'a: {b: [c, d]}\n'
+ev "flow-quoted-fold" '["a\n  b"]\n'
+ev "flow-deep-json"  '{"a":[1,{"b":null}],"c":true}\n'
+
+refuse "flow-seq-comma"  '1:2' '[,]\n'
+refuse "flow-map-comma"  '1:2' '{,}\n'
+refuse "flow-unclosed"   '1:1' '[1, 2\n'
+refuse "flow-map-unclosed" '1:1' '{a: 1\n'
+refuse "flow-wrong-close" '1:6' '[1, 2}\n'
+refuse "flow-blockscalar" '1:2' '[|\n  x\n]\n'
+refuse "flow-marker-in"  '1:1' '[1,\n--- 2\n'
+refuse "flow-two-anchors" '1:5' '[&a &b x]\n'
+
+# c-ns-flow-map-empty-key-entry: a flow mapping entry may have no key, so
+# "{: 1}" is a mapping from null. PyYAML refuses it.
+accept_only "flow-empty-key" '{: 1}\n'
+ev_diff "flow-empty-key-ev"  '{: 1}\n'
+
+# c-ns-flow-map-json-key-entry allows s-separate between a JSON-like key
+# and its colon, so the colon may be on the next line. PyYAML refuses that
+# and requires the colon to follow on the key's own line.
+accept_only "flow-colon-nextline" '{"a"\n: 1}\n'
+ev_diff "flow-colon-nextline-ev"  '{"a"\n: 1}\n'
+
 refuse "dir-no-doc"    '2:1' '%YAML 1.2\nfoo\n'
 refuse "dir-bare-pct"  '1:1' '%\n--- foo\n'
 refuse "tab-indent"    '1:1' '\tfoo\n'
