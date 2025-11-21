@@ -164,6 +164,55 @@ ev_diff() {
 	fi
 }
 
+# res NAME FMT -- the 1.1 reading of a document must be exactly what
+# PyYAML's safe_load made of it, compared as canonical text. This is the
+# oracle for the whole 1.1 resolution table, including its octal, its
+# sexagesimal and its timestamps. --dup=last is PyYAML's duplicate key
+# policy; yamlc's own default is to refuse.
+res() {
+	f=$(doc "$1" "$2")
+	a=$(python3 t/pyyaml.py dump "$f" | cut -f3-)
+	b=$($Y dump --schema=1.1 --dup=last "$f" 2>&1)
+	eq "res11/$1" "$a" "$b"
+}
+
+# r12 NAME FMT WANT -- the 1.2 core schema reading. There is no second
+# implementation of YAML 1.2 on this machine, so WANT comes from the table
+# in section 10.2.1.2, quoted in resolve.go, and not from an oracle. The
+# README says so. Where a case is also valid JSON the json comparison
+# checks the same scalar against Python's json, which is an oracle.
+r12() {
+	f=$(doc "$1" "$2")
+	eq "res12/$1" "$3" "$($Y dump --dup=last "$f" 2>&1)"
+}
+
+# refuse_res NAME FMT -- the 1.1 reading must be a refusal on both sides.
+# A document can parse and still have no 1.1 value, which is a different
+# failure from a syntax error and is counted separately.
+refuse_res() {
+	f=$(doc "$1" "$2")
+	a=$(python3 t/pyyaml.py dump "$f" | cut -f2)
+	b=$($Y dump --schema=1.1 --dup=last "$f" 2>&1)
+	eq "refuseres/$1/pyyaml" "err" "$a"
+	case "$b" in
+	*": "*) ok "refuseres/$1" ;;
+	*) bad "refuseres/$1: yamlc read it as $b" ;;
+	esac
+}
+
+# res_diff NAME FMT -- the two 1.1 readings must DIFFER, for a reason in
+# the README.
+res_diff() {
+	f=$(doc "$1" "$2")
+	a=$(python3 t/pyyaml.py dump "$f" | cut -f3-)
+	b=$($Y dump --schema=1.1 --dup=last "$f" 2>&1)
+	if [ "$a" = "$b" ]; then
+		bad "res1.1/$1: PyYAML now agrees, so this is no longer a divergence"
+	else
+		ok "res1.1/$1"
+	fi
+}
+
 status "usage/no-args"      2 $Y
 status "usage/bad-command"  2 $Y nonesuch
 status "usage/check-nofile" 2 $Y check
@@ -417,6 +466,50 @@ ev_diff "flow-empty-key-ev"  '{: 1}\n'
 # and requires the colon to follow on the key's own line.
 accept_only "flow-colon-nextline" '{"a"\n: 1}\n'
 ev_diff "flow-colon-nextline-ev"  '{"a"\n: 1}\n'
+
+# --- resolution (section 10.2.1.2 for 1.2, PyYAML's resolver for 1.1) --
+res "r-bools"      '[yes, no, on, off, true, false, True, FALSE, y, n]\n'
+res "r-nulls"      '[~, null, Null, NULL, ]\n'
+res "r-ints"       '[0, 7, -7, +7, 010, 0x1f, 0b101, 1_000, 1:30, 12:00:01]\n'
+res "r-floats"     '[1.0, .5, 5., -1.5, 1.0e+3, .inf, -.Inf, .nan, 190:20:30.15]\n'
+res "r-not-nums"   '[0o17, 1e5, 1.0e5, 0x1p3, 1.2.3, +.inf, 1:60, 08]\n'
+res "r-stamps"     '[2001-12-14, 2001-12-14 21:59:43.10 -5, 2001-12-14t21:59:43.10-05:00, 2001-12-14 21:59:43Z]\n'
+res "r-not-stamps" '[2001-1-1, 20011214]\n'
+res "r-strings"    '[abc, "123", '"'"'1.0'"'"', a b, "", Yes!, NULLs]\n'
+res "r-tagged"     '[!!str 1, !!int "7", !!bool "yes", !!float "1", !!null ""]\n'
+res "r-tagged-oct" '[!!int 010, !!int 0x10]\n'
+res "r-binary"     '!!binary "QUJD"\n'
+res "r-nested"     'a:\n  b: [1, {c: 2.5}]\n'
+res "r-blockscalar" 'a: |\n  1\nb: >\n  yes\n'
+res "r-quoted-num" '["1", 1]\n'
+res "r-big-int"    '[99999999999999999999, -99999999999999999999]\n'
+res "r-float-prec" '[0.1, 1e308, 5e-324, 1.7976931348623157e+308]\n'
+
+# The 1.2 core schema. No second 1.2 implementation is installed, so these
+# come from the specification table and are not oracle-backed.
+r12 "c-bools"      '[yes, no, true, True, TRUE, false]\n' '[str yes, str no, true, true, true, false]'
+r12 "c-nulls"      '[~, null, Null, NULL, ]\n'            '[null, null, null, null]'
+r12 "c-ints"       '[7, -7, +7, 0o17, 0x1f, 010, 0b101]\n' '[int 7, int -7, int 7, int 15, int 31, int 10, str 0b101]'
+r12 "c-sexagesimal" '[1:30]\n'                            '[str 1:30]'
+r12 "c-floats"     '[1.0, .5, 5., 1e5, 1.0E+3, .inf, -.INF, .NaN]\n' '[float 3ff0000000000000, float 3fe0000000000000, float 4014000000000000, float 40f86a0000000000, float 408f400000000000, float 7ff0000000000000, float fff0000000000000, float nan]'
+r12 "c-stamp-str"  '[2001-12-14]\n'                       '[str 2001-12-14]'
+r12 "c-underscore" '[1_000]\n'                            '[str 1_000]'
+r12 "c-merge-str"  '[<<, =]\n'                            '[str <<, str =]'
+r12 "c-quoted"     '["true", '"'"'7'"'"']\n'              '[str true, str 7]'
+r12 "c-nonspecific" '[! 7, ! true]\n'                     '[str 7, str true]'
+r12 "c-tag-bool-no" '!!bool "true"\n'                     'true'
+r12 "c-tag-int-oct" '[!!int 010, !!int 0o10, !!int 0x10]\n' '[int 10, int 8, int 16]'
+
+# An impossible date matches the 1.1 timestamp regex and then fails to be a
+# date. PyYAML raises ValueError from datetime and refuses the document, so
+# yamlc refuses it too rather than inventing a thirteenth month.
+refuse_res "r-bad-date" '2001-13-99\n'
+
+# A merge or value key outside the key position of a mapping has a 1.1 tag
+# and no 1.1 constructor, so PyYAML refuses the whole document. yamlc reads
+# both as strings. Recorded rather than fixed: refusing a sequence because
+# it holds the two characters "<<" would be a worse answer.
+res_diff "r-merge-loose" '[<<, =]\n'
 
 refuse "dir-no-doc"    '2:1' '%YAML 1.2\nfoo\n'
 refuse "dir-bare-pct"  '1:1' '%\n--- foo\n'

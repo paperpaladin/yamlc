@@ -4,13 +4,15 @@
 PyYAML implements YAML 1.1. It is used here for two separate questions,
 which are kept separate because they have different answers:
 
-  accept FILE   does a 1.1 parser read this document at all
-  events FILE   the structure it sees, with no schema resolution in it
-  load FILE     what the 1.1 resolution rules make of the scalars
+  accept FILE    does a 1.1 parser read this document at all
+  events FILE    the structure it sees, with no schema resolution in it
+  dump FILE...   what the 1.1 resolution rules make of it, one tab
+                 separated line per document
 
 Only the standard library plus PyYAML. Nothing here is allowed to know
 anything about yamlc.
 """
+import struct
 import sys
 
 
@@ -109,6 +111,74 @@ def cmd_events(path):
     return 0
 
 
+def canon(v):
+    """The canonical form yamlc's dump.go describes, built from what
+    yaml.safe_load returned. A float goes out as the hexadecimal of its
+    IEEE 754 bits, because the shortest round-trip decimal is spelled
+    differently by Go and by Python and a comparison that normalises both
+    sides is measuring the normaliser. NaN is the exception and goes out as
+    a word: the quiet NaN PyYAML builds from -inf/inf and the one Go's
+    math.NaN returns have different payloads and different signs, and
+    neither reader claims to preserve either."""
+    import datetime
+    if v is None:
+        return "null"
+    if v is True:
+        return "true"
+    if v is False:
+        return "false"
+    if isinstance(v, int):
+        return "int %d" % v
+    if isinstance(v, float):
+        if v != v:
+            return "float nan"
+        return "float %016x" % struct.unpack("<Q", struct.pack("<d", v))[0]
+    if isinstance(v, str):
+        return "str " + escape(v)
+    if isinstance(v, bytes):
+        return "bin " + v.hex()
+    if isinstance(v, datetime.datetime):
+        out = "datetime " + v.strftime("%Y-%m-%d %H:%M:%S.%f")
+        off = v.utcoffset()
+        if off is not None:
+            total = int(off.total_seconds())
+            sign = "+" if total >= 0 else "-"
+            total = abs(total)
+            out += " %s%02d:%02d" % (sign, total // 3600, (total % 3600) // 60)
+        return out
+    if isinstance(v, datetime.date):
+        return "date " + v.strftime("%Y-%m-%d")
+    if isinstance(v, list):
+        return "[" + ", ".join(canon(x) for x in v) + "]"
+    if isinstance(v, dict):
+        return "{" + ", ".join("%s: %s" % (canon(k), canon(x)) for k, x in v.items()) + "}"
+    if isinstance(v, set):
+        return "set{" + ", ".join(sorted(canon(x) for x in v)) + "}"
+    return "unsupported %s" % type(v).__name__
+
+
+def cmd_dump(paths):
+    yaml = need_yaml()
+    rc = 0
+    for path in paths:
+        with open(path, "rb") as f:
+            data = f.read()
+        try:
+            docs = list(yaml.safe_load_all(data))
+        except Exception as e:  # noqa: BLE001
+            print("%s\terr\t%s: %s" % (path, type(e).__name__,
+                                        str(e).replace("\n", " ")))
+            rc = 1
+            continue
+        for d in docs:
+            try:
+                print("%s\tok\t%s" % (path, canon(d)))
+            except RecursionError:
+                print("%s\terr\tRecursionError" % path)
+                rc = 1
+    return rc
+
+
 def cmd_version():
     yaml = need_yaml()
     print(yaml.__version__)
@@ -126,6 +196,8 @@ def main(argv):
         return cmd_accept(argv[2])
     if cmd == "events":
         return cmd_events(argv[2])
+    if cmd == "dump":
+        return cmd_dump(argv[2:])
     sys.stderr.write("t/pyyaml.py: no such command: %s\n" % cmd)
     return 2
 
