@@ -389,7 +389,7 @@ func (c *composer) floatOf(s string, explicit bool) (float64, bool) {
 			return sign * total, true
 		}
 		f, err := strconv.ParseFloat(t, 64)
-		if err != nil {
+		if err != nil && !rangeErr(err) {
 			return 0, false
 		}
 		return sign * f, true
@@ -404,12 +404,22 @@ func (c *composer) floatOf(s string, explicit bool) (float64, bool) {
 		return math.NaN(), true
 	case re12Float.MatchString(s):
 		f, err := strconv.ParseFloat(strings.TrimPrefix(s, "+"), 64)
-		if err != nil {
+		if err != nil && !rangeErr(err) {
 			return 0, false
 		}
 		return f, true
 	}
 	return 0, false
+}
+
+// rangeErr lets a float that does not fit a double through with the value
+// ParseFloat returned, which is an infinity or a zero. Python's json does
+// the same with 1e400 and 1e-400, and JSON documents holding both are in
+// the corpus, so refusing them would be a disagreement with the oracle
+// rather than caution.
+func rangeErr(err error) bool {
+	e, ok := err.(*strconv.NumError)
+	return ok && e.Err == strconv.ErrRange
 }
 
 var reStamp = regexp.MustCompile(`^([0-9]{4})-([0-9][0-9]?)-([0-9][0-9]?)` +

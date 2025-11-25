@@ -451,50 +451,110 @@ func (p *parser) parseBlockNode(c blockCtx) (*Node, error) {
 		return p.empty(), nil
 	}
 	line, col := p.s.line, p.s.col
-	anchor, tag, tagRaw := "", "", ""
+	var pr props
 	for p.s.peek(0) == '&' || p.s.peek(0) == '!' {
+		pline, pcol := p.s.line, p.s.col
 		if p.s.peek(0) == '&' {
-			if anchor != "" {
+			if pr.anchor != "" {
 				return nil, p.s.errf("a node can carry only one anchor")
 			}
-			if anchor, err = p.readAnchor(); err != nil {
+			if pr.anchor, err = p.readAnchor(); err != nil {
 				return nil, err
 			}
+			pr.anchorLine, pr.anchorCol = pline, pcol
 		} else {
-			if tagRaw != "" {
+			if pr.tagRaw != "" {
 				return nil, p.s.errf("a node can carry only one tag")
 			}
-			if tag, tagRaw, err = p.readTag(); err != nil {
+			if pr.tag, pr.tagRaw, err = p.readTag(); err != nil {
 				return nil, err
 			}
+			pr.tagLine, pr.tagCol = pline, pcol
 		}
 		if !isBlank(p.s.peek(0)) && !p.atLineEnd() {
 			return nil, p.s.errf("a property must be followed by a space")
 		}
-		propLine := p.s.line
 		found, err = p.toContent(&c)
 		if err != nil {
 			return nil, err
 		}
-		c.afterProps = found && p.s.line == propLine
 		if !found {
 			n := p.empty()
-			n.Anchor, n.Tag, n.TagRaw = anchor, tag, tagRaw
+			n.Anchor, n.Tag, n.TagRaw = pr.anchor, pr.tag, pr.tagRaw
 			n.Line, n.Col = line, col+1
 			return n, nil
 		}
 	}
-	n, err := p.blockContent(c, anchor, tag, tagRaw, line, col)
+	// Which properties belong to this node and which to the mapping key
+	// that may be about to appear is decided by the line they are on. See
+	// the note on props.
+	c.afterProps = pr.onLine(p.s.line)
+	n, err := p.blockContent(c, pr, line, col)
 	if err != nil {
 		return nil, err
 	}
 	return n, nil
 }
 
-func (p *parser) blockContent(c blockCtx, anchor, tag, tagRaw string, line, col int) (*Node, error) {
+// props is the anchor and tag read before a node, with the position of
+// each. The positions matter because of one document shape:
+//
+//	--- !e!t
+//	&a k: v
+//	? [1,2]
+//	: {x: y}
+//
+// The tag is on the --- line and belongs to the mapping. The anchor is on
+// the first key's line and belongs to the key, which also means the mapping
+// begins at the anchor's column and so takes the explicit entry below. The
+// first version of this read both properties as the root node's, put the
+// mapping at the tag's column, and refused the last two lines. PyYAML
+// splits them the same way, because its scanner records a possible simple
+// key at the anchor token.
+type props struct {
+	anchor                string
+	tag, tagRaw           string
+	anchorLine, anchorCol int
+	tagLine, tagCol       int
+}
+
+func (pr props) onLine(line int) bool {
+	return (pr.anchor != "" && pr.anchorLine == line) ||
+		(pr.tagRaw != "" && pr.tagLine == line)
+}
+
+// split divides the properties between a mapping and its first key by the
+// line each one sits on, and gives the column the mapping starts at.
+func (pr props) split(line, here int) (keyP, mapP props, ind int) {
+	ind = here
+	if pr.anchor != "" {
+		if pr.anchorLine == line {
+			keyP.anchor, keyP.anchorLine, keyP.anchorCol = pr.anchor, pr.anchorLine, pr.anchorCol
+			if pr.anchorCol < ind {
+				ind = pr.anchorCol
+			}
+		} else {
+			mapP.anchor = pr.anchor
+		}
+	}
+	if pr.tagRaw != "" {
+		if pr.tagLine == line {
+			keyP.tag, keyP.tagRaw = pr.tag, pr.tagRaw
+			if pr.tagCol < ind {
+				ind = pr.tagCol
+			}
+		} else {
+			mapP.tag, mapP.tagRaw = pr.tag, pr.tagRaw
+		}
+	}
+	return keyP, mapP, ind
+}
+
+func (p *parser) blockContent(c blockCtx, pr props, line, col int) (*Node, error) {
 	ch := p.s.peek(0)
 	here := p.s.col
-	n := &Node{Kind: KScalar, Anchor: anchor, Tag: tag, TagRaw: tagRaw, Line: line, Col: col + 1}
+	n := &Node{Kind: KScalar, Anchor: pr.anchor, Tag: pr.tag, TagRaw: pr.tagRaw,
+		Line: line, Col: col + 1}
 	// A block collection after inline properties is not a production:
 	// s-l+block-collection puts s-l-comments between the properties and the
 	// collection, so the indicator has to be on a later line.
@@ -567,23 +627,18 @@ func (p *parser) blockContent(c blockCtx, anchor, tag, tagRaw string, line, col 
 		if err := blockOK("block mapping"); err != nil {
 			return nil, err
 		}
-		// Whose properties were they? An anchor on the same line as the
-		// key belongs to the key, because an implicit key is a
-		// ns-flow-yaml-node and may carry properties. An anchor on an
-		// earlier line went through s-l+block-collection and belongs to
-		// the mapping. "a: &x\n  b: 1" anchors the inner mapping, not "b".
-		mapInd := here
-		m := &Node{Kind: KMap, Line: line, Col: col + 1}
-		if c.afterProps {
-			mapInd = col
-		} else {
-			m.Anchor, m.Tag, m.TagRaw = n.Anchor, n.Tag, n.TagRaw
-			n.Anchor, n.Tag, n.TagRaw = "", "", ""
-			m.Line, m.Col = n.Line, n.Col
-		}
+		// An anchor or tag on the same line as the key belongs to the key,
+		// because an implicit key is an ns-flow-yaml-node and may carry
+		// properties. One on an earlier line went through
+		// s-l+block-collection and belongs to the mapping: "a: &x" then
+		// "  b: 1" anchors the inner mapping, not the key "b".
+		keyP, mapP, mapInd := pr.split(p.s.line, here)
+		n.Anchor, n.Tag, n.TagRaw = keyP.anchor, keyP.tag, keyP.tagRaw
+		m := &Node{Kind: KMap, Anchor: mapP.anchor, Tag: mapP.tag, TagRaw: mapP.tagRaw,
+			Line: line, Col: mapInd + 1}
 		return p.parseBlockMap(mapInd, n, m)
 	}
-	if n.Kind == KAlias && (anchor != "" || tagRaw != "") {
+	if n.Kind == KAlias && (pr.anchor != "" || pr.tagRaw != "") {
 		return nil, p.s.errAt(line, col, "an alias cannot carry an anchor or a tag")
 	}
 	if err := p.endLine(); err != nil {

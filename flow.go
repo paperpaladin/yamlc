@@ -209,12 +209,11 @@ func (p *parser) flowValue(ind, oline, ocol int, closing byte) (*Node, error) {
 // alias, a nested collection, a quoted scalar or a plain scalar. jsonLike
 // reports whether the node may be followed by a colon with no space, which
 // is what makes {"a":1} parse.
+// flowNode does not count against the depth limit itself. Every recursion
+// through it goes via parseFlow, which does, and counting both made the
+// limit bite at half the nesting it names: 390 nested arrays were refused
+// by a limit of 400.
 func (p *parser) flowNode(ind, oline, ocol int, closing byte) (*Node, bool, error) {
-	p.depth++
-	defer func() { p.depth-- }()
-	if p.depth > p.maxDepth {
-		return nil, false, p.s.errf("nesting deeper than %d, refused", p.maxDepth)
-	}
 	line, col := p.s.line, p.s.col
 	n := &Node{Kind: KScalar, Line: line, Col: col + 1}
 	props := false

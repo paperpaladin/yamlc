@@ -47,7 +47,7 @@ func writeEvents(w io.Writer, docs []*Document) {
 	fmt.Fprintln(w, "-STR")
 }
 
-func props(n *Node) string {
+func eventProps(n *Node) string {
 	var b strings.Builder
 	if n.Anchor != "" {
 		b.WriteString(" &" + n.Anchor)
@@ -63,13 +63,13 @@ func writeNodeEvents(w io.Writer, n *Node) {
 	case KAlias:
 		fmt.Fprintf(w, "=ALI *%s\n", n.Alias)
 	case KScalar:
-		fmt.Fprintf(w, "=VAL%s %s%s\n", props(n), n.Style.char(), escapeEvent(n.Val))
+		fmt.Fprintf(w, "=VAL%s %s%s\n", eventProps(n), n.Style.char(), escapeEvent(n.Val))
 	case KSeq:
 		flow := ""
 		if n.Flow {
 			flow = " []"
 		}
-		fmt.Fprintf(w, "+SEQ%s%s\n", props(n), flow)
+		fmt.Fprintf(w, "+SEQ%s%s\n", eventProps(n), flow)
 		for _, c := range n.Seq {
 			writeNodeEvents(w, c)
 		}
@@ -79,7 +79,7 @@ func writeNodeEvents(w io.Writer, n *Node) {
 		if n.Flow {
 			flow = " {}"
 		}
-		fmt.Fprintf(w, "+MAP%s%s\n", props(n), flow)
+		fmt.Fprintf(w, "+MAP%s%s\n", eventProps(n), flow)
 		for _, pr := range n.Map {
 			writeNodeEvents(w, pr.Key)
 			writeNodeEvents(w, pr.Val)

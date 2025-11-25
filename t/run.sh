@@ -532,6 +532,63 @@ accept_only "suffix-alone"      '...\n'
 ev_diff "bare-after-suffix-ev"  'a\n...\nb\n'
 ev_diff "nel-fold"              'a b\302\205c\n'
 
+# --- the json oracle --------------------------------------------------
+#
+# YAML 1.2 is a strict superset of JSON, so this is the one comparison in
+# the project that is not a second opinion. A single disagreement means the
+# parser is wrong.
+python3 t/corpus.py system t/corpus || exit 2
+python3 t/corpus.py hard t/corpus/hard || exit 2
+JC=$W/jsoncmp.out
+python3 t/jsoncmp.py $Y t/corpus/system.list t/corpus/hard > "$JC" || exit 2
+jget() { sed -n "s/^$1 //p" "$JC"; }
+echo "json: $(jget files) files, $(jget same) same, $(jget differ) differ, $(jget refused) refused"
+eq "json/differ"  "0" "$(jget differ)"
+eq "json/missing" "0" "$(jget missing)"
+eq "json/same-is-most" "yes" "$([ "$(jget same)" -gt 2000 ] && echo yes || echo no)"
+
+# Every refusal on a valid JSON document has to be named here with its
+# cause, or it is a hole. There is exactly one, and it is in the YAML
+# specification rather than in this parser: JSON escapes only characters
+# below #x20, so a raw DEL in a string is legal JSON, and c-printable in
+# section 5.1 leaves #x7F out. A 1.2 reader cannot hold that document.
+eq "json/refusals" "raw-del.json" \
+	"$(sed -n 's/^refused-path \([^ ]*\) .*/\1/p' "$JC" | tr '\n' ' ' | sed 's/ $//')"
+
+# A raw U+0085 in a JSON string is the mirror case and is NOT a refusal:
+# 1.2 counts NEL as printable and not as a line break, so the document
+# reads and agrees with json. This was the case that found a bug in the
+# comparison script rather than in the parser: Python's splitlines breaks
+# on U+0085, so one output line became two.
+eq "json/nel-in-string" "$(printf '%b' '["a\302\205b"]')" "$($Y json t/corpus/hard/raw-c1.json)"
+
+# --- hostile input ----------------------------------------------------
+HO=$W/hostile.out
+python3 t/hostile.py $Y t/corpus/hostile > "$HO" || exit 2
+hget() { sed -n "s/^$1 //p" "$HO"; }
+hfile() { sed -n "s/^file $1 \([a-z]*\) .*/\1/p" "$HO"; }
+echo "hostile: $(hget built) built, $(hget read) read, $(hget refused) refused, $(hget crashed) crashed"
+eq "hostile/crashed"    "0" "$(hget crashed)"
+eq "hostile/missing"    "0" "$(hget missing)"
+eq "hostile/noposition" "0" "$(hget noposition)"
+
+# A refusal with no position is as bad as no refusal, so the sweep counts
+# those separately and the count has to be zero.
+for f in laughs.yaml deep-flow-seq.yaml deep-flow-map.yaml deep-block-seq.yaml \
+	deep-block-map.yaml deep-flow-unclosed.yaml cycle-seq.yaml cycle-map.yaml \
+	cycle-nested.yaml cycle-deep.yaml cycle-key.yaml alias-undefined.yaml \
+	alias-later.yaml open-quote.yaml open-dquote.yaml open-flow-seq.yaml \
+	open-flow-map.yaml open-verbatim-tag.yaml tab-indent.yaml tab-seq.yaml; do
+	eq "hostile/refuse/$f" "err" "$(hfile $f)"
+done
+
+# ... and the ones that must still be read, so that the limits are
+# boundaries and not a wall everything hits.
+for f in laughs-small.yaml anchor-huge.yaml long-line.yaml long-key.yaml \
+	many-keys.yaml many-anchors.yaml many-aliases.yaml many-docs.yaml; do
+	eq "hostile/read/$f" "ok" "$(hfile $f)"
+done
+
 echo
 echo "pyyaml $PYYAML"
 echo "$pass passed, $fail failed"
