@@ -213,6 +213,46 @@ res_diff() {
 	fi
 }
 
+# refuse_at NAME POS FMT -- yamlc refuses at exactly POS, with the oracle
+# assertion made separately by whichever helper fits that case. Used where
+# PyYAML refuses the document too but at a different stage, so neither
+# refuse nor refuse_dup says the right thing.
+refuse_at() {
+	f=$(doc "$1" "$3")
+	got=$($Y check "$f" 2>&1)
+	eq "refuseat/$1" "$f:$2" "$(echo "$got" | sed 's/\(:[0-9]*:[0-9]*\).*/\1/')"
+}
+
+# refuse_dup NAME POS FMT -- yamlc refuses the document for a repeated
+# key at exactly POS, and PyYAML reads it, because PyYAML keeps the last
+# value. The two behaviours are both in the README; this asserts the
+# refusal has the right position and that PyYAML really does differ.
+refuse_dup() {
+	f=$(doc "$1" "$3")
+	got=$($Y check "$f" 2>&1)
+	eq "dup/$1" "$f:$2" "$(echo "$got" | sed 's/\(:[0-9]*:[0-9]*\).*/\1/')"
+	a=$(python3 t/pyyaml.py dump "$f" | cut -f2)
+	eq "dup/$1/pyyaml-reads-it" "ok" "$a"
+}
+
+# dup_policy NAME POLICY FMT WANT -- what --dup=first and --dup=last do.
+dup_policy() {
+	f=$(doc "$1" "$3")
+	eq "duppolicy/$1" "$4" "$($Y dump --dup=$2 "$f" 2>&1)"
+}
+
+# dup_schema11 NAME FMT -- a document that is a duplicate key error under
+# the 1.1 rules and a valid two-entry mapping under 1.2. This is the shape
+# the whole second half of the project is about.
+dup_schema11() {
+	f=$(doc "$1" "$2")
+	out=$($Y dump --schema=1.1 "$f" 2>&1)
+	case "$out" in
+	*"key repeats"*) ok "dupschema/$1" ;;
+	*) bad "dupschema/$1: 1.1 read it as $out" ;;
+	esac
+}
+
 status "usage/no-args"      2 $Y
 status "usage/bad-command"  2 $Y nonesuch
 status "usage/check-nofile" 2 $Y check
@@ -531,6 +571,58 @@ accept_only "bare-after-suffix" 'a\n...\nb\n'
 accept_only "suffix-alone"      '...\n'
 ev_diff "bare-after-suffix-ev"  'a\n...\nb\n'
 ev_diff "nel-fold"              'a b\302\205c\n'
+
+# --- the merge key and duplicate keys ---------------------------------
+#
+# << is a 1.1 type that every 1.2 implementation also carries, and the
+# comparison here is against PyYAML's flatten_mapping.
+res "merge-one"      'b: &b {x: 1, y: 2}\nd:\n  <<: *b\n  y: 3\n'
+res "merge-seq"      'p: &p {x: 1}\nq: &q {x: 2, y: 2}\nd:\n  <<: [*p, *q]\n  z: 3\n'
+res "merge-inline"   'b: &b {x: 1}\nd: {<<: *b, y: 2}\n'
+res "merge-nested"   'a: &a {x: 1}\nb: &b {<<: *a, y: 2}\nc: {<<: *b, z: 3}\n'
+res "merge-literal"  'd:\n  <<: {x: 1}\n  y: 2\n'
+res "merge-only"     'b: &b {x: 1}\nd:\n  <<: *b\n'
+res "merge-order"    'b: &b {x: 1, y: 2}\nd:\n  y: 9\n  <<: *b\n  z: 3\n'
+res "merge-twice"    'p: &p {x: 1}\nq: &q {y: 2}\nd:\n  <<: *p\n  <<: *q\n'
+res "merge-quoted"   'd:\n  "<<": 1\n'
+res "merge-value-eq" 'd:\n  =: 1\n'
+
+# A << whose value is not a mapping is a refusal in both readers, but
+# PyYAML only notices when it constructs, so the comparison is against its
+# loader rather than against its parser.
+refuse_res "merge-scalar"  'd:\n  <<: 1\n'
+refuse_at  "merge-scalar"  '2:7' 'd:\n  <<: 1\n'
+refuse_res "merge-seq-bad" 'd:\n  <<: [1]\n'
+refuse_at  "merge-seq-bad" '2:7' 'd:\n  <<: [1]\n'
+
+# Duplicate keys. Section 3.2.1.1: "the content of a mapping node is an
+# unordered set of key/value node pairs, with the restriction that each of
+# the keys is unique". yamlc refuses by default and PyYAML keeps the last,
+# so every comparison above runs with --dup=last and these check the
+# refusal itself.
+refuse_dup "dup-plain"    '2:1' 'a: 1\na: 2\n'
+refuse_dup "dup-flow"     '1:8' '{a: 1, a: 2}\n'
+refuse_dup "dup-quoted"   '1:8' '{a: 1, "a": 2}\n'
+refuse_dup "dup-anchor"   '1:11' '{a: &x 1, a: 2}\n'
+# A sequence as a mapping key is unhashable in Python, so PyYAML refuses
+# this document for its own reason rather than for the duplicate.
+refuse_at  "dup-seq-key" '1:10' '{[1]: a, [1]: b}\n'
+refuse_res "dup-seq-key" '{[1]: a, [1]: b}\n'
+refuse_dup "dup-null-key" '1:8' '{~: a, null: b}\n'
+refuse_dup "dup-nested"   '1:11' 'x: {k: 1, k: 2}\ny: 1\n'
+
+dup_policy "dup-last"  'last'  'a: 1\na: 2\n' '{str a: int 2}'
+dup_policy "dup-first" 'first' 'a: 1\na: 2\n' '{str a: int 1}'
+
+# 1 and 1.0 are different keys because they resolve to different types.
+r12 "dup-int-float" '{1: a, 1.0: b}\n' '{int 1: str a, float 3ff0000000000000: str b}'
+
+# And the one that only a tool like this will tell you about: yes and true
+# are the SAME key under 1.1 and two different keys under 1.2, so this
+# document is a duplicate key error to a 1.1 reader and a two-entry
+# mapping to a 1.2 reader.
+r12 "dup-schema-11"  '{yes: 1, true: 2}\n' '{str yes: int 1, true: int 2}'
+dup_schema11 "dup-schema-11-refused" '{yes: 1, true: 2}\n'
 
 # --- the json oracle --------------------------------------------------
 #
