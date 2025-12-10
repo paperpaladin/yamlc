@@ -82,6 +82,14 @@ func (p *parser) atMarker(m string) bool {
 
 func (p *parser) atAnyMarker() bool { return p.atMarker("---") || p.atMarker("...") }
 
+// atBoundary is atAnyMarker plus a directive. A "%" at column zero can
+// only be a directive, since ns-plain-first excludes it, so it ends
+// whatever collection is open: a %TAG between two documents was being read
+// as the next key of the mapping above it.
+func (p *parser) atBoundary() bool {
+	return p.atAnyMarker() || (p.s.col == 0 && p.s.peek(0) == '%')
+}
+
 // skipLine consumes the rest of the line including its break.
 func (p *parser) skipLine() {
 	for !p.s.eof() && p.s.peek(0) != '\n' {

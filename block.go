@@ -24,7 +24,7 @@ func (p *parser) parseBlockSeq(ind int, n *Node) (*Node, error) {
 		if err := p.skipPrefix(); err != nil {
 			return nil, err
 		}
-		if p.s.eof() || p.atAnyMarker() {
+		if p.s.eof() || p.atBoundary() {
 			p.reset(m)
 			return n, nil
 		}
@@ -82,7 +82,17 @@ func (p *parser) parseBlockMap(ind int, firstKey *Node, n *Node) (*Node, error) 
 			ind2 := p.skipSpaces()
 			if ind2 == ind && p.s.peek(0) == ':' && spaceOrEnd(p.s.peek(1)) {
 				p.s.next()
-				val, err = p.parseBlockNode(blockCtx{ind: ind, inline: true, seqAtInd: true})
+				// l-block-map-explicit-value is ":" then
+				// s-l+block-indented, which includes ns-l-compact-mapping
+				// and ns-l-compact-sequence, so a collection MAY begin on
+				// this line. The implicit form is different: it uses
+				// s-l+block-node, which puts a line break first, which is
+				// why "a: b: c" is a refusal and "? a" then ": b: c" is
+				// not. PyYAML's emitter writes the second shape whenever a
+				// mapping has an empty key, so a corpus of its output is
+				// full of them.
+				val, err = p.parseBlockNode(blockCtx{ind: ind, inline: true,
+					compact: true, seqAtInd: true})
 			} else {
 				p.reset(m)
 				val = p.empty()
@@ -115,7 +125,7 @@ func (p *parser) parseBlockMap(ind int, firstKey *Node, n *Node) (*Node, error) 
 		if err := p.skipPrefix(); err != nil {
 			return nil, err
 		}
-		if p.s.eof() || p.atAnyMarker() {
+		if p.s.eof() || p.atBoundary() {
 			p.reset(m)
 			return n, nil
 		}

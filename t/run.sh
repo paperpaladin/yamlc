@@ -654,6 +654,36 @@ eq "json/refusals" "raw-del.json" \
 # on U+0085, so one output line became two.
 eq "json/nel-in-string" "$(printf '%b' '["a\302\205b"]')" "$($Y json t/corpus/hard/raw-c1.json)"
 
+# --- a YAML corpus written by PyYAML's emitter -------------------------
+#
+# There are nine YAML files on this machine, which is not a corpus. There
+# are a few thousand JSON files and an emitter this project does not
+# control, so the corpus is built by loading JSON with the json module and
+# writing it out as YAML in six styles: block, flow, canonical, explicit
+# start and end, a narrow width that forces line folding, and
+# allow_unicode off that forces \uXXXX escapes.
+#
+# Three separate comparisons on each file, counted apart because they fail
+# for different reasons. The event streams (the grammar), the 1.1 values
+# against safe_load (the resolution rules), and both against the canonical
+# form of the original Python object, which is the only one of the three
+# that knows what the document was supposed to say.
+YC=$W/yamlcmp.out
+python3 t/yamlcmp.py $Y t/corpus/yaml --sample 200 > "$YC" || exit 2
+yget() { sed -n "s/^$1 //p" "$YC"; }
+echo "yaml corpus: $(yget files) files, events $(yget ev-same) same $(yget ev-differ) differ, values $(yget val-same) same $(yget val-differ) differ $(yget val-refused) refused"
+eq "yamlcorpus/ev-differ"     "0" "$(yget ev-differ)"
+eq "yamlcorpus/ev-refused"    "0" "$(yget ev-refused)"
+eq "yamlcorpus/origin-differ" "0" "$(yget origin-differ)"
+eq "yamlcorpus/enough"        "yes" "$([ "$(yget ev-same)" -gt 600 ] && echo yes || echo no)"
+
+# Every value disagreement must be on one of the machine's own YAML files
+# rather than on one of the generated ones, and those are named in the
+# README with their causes. Asserting the shape rather than the file names
+# keeps this true on a machine with a different set of YAML files.
+eq "yamlcorpus/val-differ-native-only" "" \
+	"$(sed -n 's/^val-\(differ\|refused\) //p' "$YC" | grep -v '^native-' | grep -v '^[0-9]*$' | tr '\n' ' ')"
+
 # --- hostile input ----------------------------------------------------
 HO=$W/hostile.out
 python3 t/hostile.py $Y t/corpus/hostile > "$HO" || exit 2

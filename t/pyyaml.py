@@ -64,7 +64,16 @@ def escape(v):
 STYLE = {None: ":", "": ":", "'": "'", '"': '"', "|": "|", ">": ">"}
 
 
-def cmd_events(path):
+def cmd_events(paths, batch=False):
+    rc = 0
+    for p in paths:
+        if batch:
+            print("=== %s" % p)
+        rc |= events_one(p)
+    return rc
+
+
+def events_one(path):
     yaml = need_yaml()
     with open(path, "rb") as f:
         data = f.read()
@@ -104,8 +113,7 @@ def cmd_events(path):
             elif n == "MappingEndEvent":
                 out.append("-MAP")
     except Exception as e:  # noqa: BLE001
-        sys.stderr.write("refused: %s\n" % type(e).__name__)
-        print("\n".join(out))
+        print("!!! %s: %s" % (type(e).__name__, str(e).replace("\n", " ")))
         return 1
     print("\n".join(out))
     return 0
@@ -152,6 +160,13 @@ def canon(v):
         return "[" + ", ".join(canon(x) for x in v) + "]"
     if isinstance(v, dict):
         return "{" + ", ".join("%s: %s" % (canon(k), canon(x)) for k, x in v.items()) + "}"
+    if isinstance(v, tuple):
+        # construct_yaml_omap and construct_yaml_pairs return lists of
+        # pairs rather than mappings, which is a data model yamlc does not
+        # have: it keeps the sequence of single-pair mappings and carries
+        # the tag. Rendered rather than refused so the difference is
+        # legible in the report.
+        return "(" + ", ".join(canon(x) for x in v) + ")"
     if isinstance(v, set):
         return "set{" + ", ".join(sorted(canon(x) for x in v)) + "}"
     return "unsupported %s" % type(v).__name__
@@ -195,7 +210,9 @@ def main(argv):
     if cmd == "accept":
         return cmd_accept(argv[2])
     if cmd == "events":
-        return cmd_events(argv[2])
+        if argv[2] == "--batch":
+            return cmd_events(argv[3:], batch=True)
+        return cmd_events(argv[2:])
     if cmd == "dump":
         return cmd_dump(argv[2:])
     sys.stderr.write("t/pyyaml.py: no such command: %s\n" % cmd)

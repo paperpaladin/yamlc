@@ -134,26 +134,39 @@ func escapeEvent(s string) string {
 	return b.String()
 }
 
+// cmdEvents takes --batch for the same reason the other commands do: a
+// corpus of a few thousand files should cost one process. In batch form
+// each file is announced with a "=== NAME" line and a refusal appears as
+// "!!! message", which t/pyyaml.py prints in the same shape.
 func cmdEvents(args []string) int {
+	batch := false
+	if len(args) > 0 && args[0] == "--batch" {
+		batch, args = true, args[1:]
+	}
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "yamlc events: no files")
 		return 2
 	}
 	rc := 0
 	for _, name := range args {
+		if batch {
+			fmt.Printf("=== %s\n", name)
+		}
 		raw, err := readInput(name)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			rc = 1
-			continue
+		if err == nil {
+			var docs []*Document
+			docs, err = parseStream(name, raw, 0)
+			if err == nil {
+				writeEvents(os.Stdout, docs)
+				continue
+			}
 		}
-		docs, err := parseStream(name, raw, 0)
-		if err != nil {
+		rc = 1
+		if batch {
+			fmt.Printf("!!! %v\n", err)
+		} else {
 			fmt.Fprintln(os.Stderr, err)
-			rc = 1
-			continue
 		}
-		writeEvents(os.Stdout, docs)
 	}
 	return rc
 }
