@@ -611,17 +611,18 @@ func (p *parser) blockContent(c blockCtx, pr props, line, col int) (*Node, error
 		} else {
 			n.Style = StFolded
 		}
-		v, err := p.scanBlockScalar(c.ind, n.Style)
+		v, chomp, given, err := p.scanBlockScalar(c.ind, n.Style)
 		if err != nil {
 			return nil, err
 		}
-		n.Val = v
+		n.Val, n.Chomp, n.IndentGiven = v, chomp, given
 		return n, nil
 	}
 	multi, err := p.inlineNode(n, c.ind)
 	if err != nil {
 		return nil, err
 	}
+	n.MultiLine = multi
 	// A ":" here turns what was just read into the first key of a block
 	// mapping. After a quoted scalar or a flow collection it needs no
 	// space after it, which is c-s-implicit-json-key in section 7.4.2 and

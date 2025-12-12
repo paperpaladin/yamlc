@@ -42,6 +42,10 @@ esac
 
 W=$(mktemp -d "${TMPDIR:-/tmp}/yamlc.XXXXXXXX") || exit 2
 trap 'rm -rf "$W"' EXIT INT TERM
+# $W/d holds the documents the cases below write, and nothing else, so
+# that the construct counter at the end can be pointed at exactly what
+# this run fed the parser.
+mkdir -p "$W/d" "$W/o"
 
 pass=0
 fail=0
@@ -70,8 +74,8 @@ status() {
 # doc NAME FMT -- write a document from a printf format string, so that a
 # case can hold an exact byte without a separate file.
 doc() {
-	printf '%b' "$2" > "$W/$1"
-	echo "$W/$1"
+	printf '%b' "$2" > "$W/d/$1"
+	echo "$W/d/$1"
 }
 
 # accept NAME FMT -- yamlc reads the document, and PyYAML reads it too.
@@ -631,7 +635,7 @@ dup_schema11 "dup-schema-11-refused" '{yes: 1, true: 2}\n'
 # parser is wrong.
 python3 t/corpus.py system t/corpus || exit 2
 python3 t/corpus.py hard t/corpus/hard || exit 2
-JC=$W/jsoncmp.out
+JC=$W/o/jsoncmp.out
 python3 t/jsoncmp.py $Y t/corpus/system.list t/corpus/hard > "$JC" || exit 2
 jget() { sed -n "s/^$1 //p" "$JC"; }
 echo "json: $(jget files) files, $(jget same) same, $(jget differ) differ, $(jget refused) refused"
@@ -668,7 +672,7 @@ eq "json/nel-in-string" "$(printf '%b' '["a\302\205b"]')" "$($Y json t/corpus/ha
 # against safe_load (the resolution rules), and both against the canonical
 # form of the original Python object, which is the only one of the three
 # that knows what the document was supposed to say.
-YC=$W/yamlcmp.out
+YC=$W/o/yamlcmp.out
 python3 t/yamlcmp.py $Y t/corpus/yaml --sample 200 > "$YC" || exit 2
 yget() { sed -n "s/^$1 //p" "$YC"; }
 echo "yaml corpus: $(yget files) files, events $(yget ev-same) same $(yget ev-differ) differ, values $(yget val-same) same $(yget val-differ) differ $(yget val-refused) refused"
@@ -685,7 +689,7 @@ eq "yamlcorpus/val-differ-native-only" "" \
 	"$(sed -n 's/^val-\(differ\|refused\) //p' "$YC" | grep -v '^native-' | grep -v '^[0-9]*$' | tr '\n' ' ')"
 
 # --- hostile input ----------------------------------------------------
-HO=$W/hostile.out
+HO=$W/o/hostile.out
 python3 t/hostile.py $Y t/corpus/hostile > "$HO" || exit 2
 hget() { sed -n "s/^$1 //p" "$HO"; }
 hfile() { sed -n "s/^file $1 \([a-z]*\) .*/\1/p" "$HO"; }
@@ -709,6 +713,74 @@ done
 for f in laughs-small.yaml anchor-huge.yaml long-line.yaml long-key.yaml \
 	many-keys.yaml many-anchors.yaml many-aliases.yaml many-docs.yaml; do
 	eq "hostile/read/$f" "ok" "$(hfile $f)"
+done
+
+# --- the divergence report --------------------------------------------
+#
+# The deliverable. Each kind of finding is asserted on a document written
+# to produce exactly that kind, because a report that prints nothing is
+# indistinguishable from a document with nothing in it.
+dv() {
+	f=$(doc "$1" "$2")
+	eq "diverge/$1" "$3" "$($Y diverge "$f" 2>&1 | sed -n "s|^$f:||p" | cut -d" " -f1-2 | tr "\n" ";")"
+}
+
+dv "dv-sexagesimal" 'a: 1:30\n' '1:4: scalar;'
+dv "dv-octal"       'a: 010\n' '1:4: scalar;'
+dv "dv-yes"         'a: yes\n' '1:4: scalar;'
+dv "dv-timestamp"   'a: 2001-12-14\n' '1:4: scalar;'
+dv "dv-oh-octal"    'a: 0o17\n' '1:4: scalar;'
+dv "dv-exp"         'a: 1e5\n' '1:4: scalar;'
+dv "dv-tilde"       'a: ~\n'         ''
+dv "dv-merge"       'a:\n  <<: {b: 1}\n' '2:3: merge;'
+dv "dv-dupkey"      '{yes: 1, true: 2}\n' '1:1: dupkey;1:2: scalar;'
+dv "dv-nel"         'a: b\302\205c\n' '1:5: linebreak;'
+dv "dv-ls"          'a: b\342\200\250c\n' '1:5: linebreak;'
+dv "dv-ps"          'a: b\342\200\251c\n' '1:5: linebreak;'
+dv "dv-directive"   '%YAML 1.1\n--- a: 1\n' '1:1: directive;'
+dv "dv-tab-plain"   'a: b\tc\n' '1:4: tab-in-plain;'
+dv "dv-bad-date"    'a: 2001-13-99\n' '1:4: scalar-refused;'
+dv "dv-clean"       'a: [1, 2.5, "x", null, true]\n' ''
+dv "dv-quoted-safe" 'a: "yes"\nb: '"'"'1:30'"'"'\n' ''
+
+# scalars prints every scalar with both readings and marks the ones that
+# differ, which is what a reader of a real document needs.
+f=$(doc "sc-mixed" 'a: yes\nb: "yes"\n')
+eq "scalars/marks-divergence" "1:4* \$.a :yes | 1.2 str yes | 1.1 true" \
+	"$($Y scalars "$f" | sed -n 2p)"
+eq "scalars/quoted-is-quiet"  "2:4  \$.b \"yes | 1.2 str yes | 1.1 str yes" \
+	"$($Y scalars "$f" | sed -n 4p)"
+
+# --- the construct counter --------------------------------------------
+#
+# Pointed at exactly the documents this run fed the parser, plus the
+# generated corpora. A folded-scalar comparison over a corpus with no
+# folded scalars passes having run nothing, so every construct the parser
+# has is counted and every count below has to be non-zero.
+CN=$W/o/counts.out
+$Y counts "$W"/d/* t/corpus/yaml/* t/corpus/hard/*.json > "$CN" || exit 2
+cget() { sed -n "s/^$1 //p" "$CN"; }
+echo "corpus: $(cget files.read) documents read, $(cget files.refused) refused, deepest nesting $(cget depth.max)"
+for k in doc doc.explicit doc.bare doc.end-marked directive.yaml \
+	scalar.plain scalar.plain.multiline scalar.plain.tab scalar.empty \
+	scalar.single scalar.single.multiline scalar.double scalar.double.multiline \
+	scalar.literal scalar.folded \
+	blockscalar.chomp.clip blockscalar.chomp.strip blockscalar.chomp.keep \
+	blockscalar.indent.given blockscalar.blank-line \
+	block.seq block.map flow.seq flow.map collection.empty seq.nested-in-seq \
+	map.key.explicit map.key.empty map.key.collection map.value.empty \
+	anchor alias merge.key \
+	tag.primary tag.secondary tag.verbatim tag.non-specific tag.named-handle \
+	resolve.1.2.null resolve.1.2.bool resolve.1.2.int resolve.1.2.float \
+	resolve.1.2.str resolve.1.1.timestamp resolve.1.1.merge resolve.1.1.value \
+	diverge.scalar diverge.scalar-refused diverge.same-tag-other-value; do
+	n=$(cget "$k")
+	[ -n "$n" ] || n=0
+	if [ "$n" -gt 0 ]; then
+		ok "counts/$k = $n"
+	else
+		bad "counts/$k is zero: the corpus holds none of these, so every assertion about them is vacuous"
+	fi
 done
 
 echo

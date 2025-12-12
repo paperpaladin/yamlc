@@ -249,20 +249,20 @@ func (p *parser) hexDigits(n, line, col int) (int, error) {
 // next to a more-indented line, or next to a blank line, stays a break. The
 // structure here follows PyYAML's reading of it, which PyYAML's own comment
 // calls ambiguous and which the comparison in t/run.sh holds it to.
-func (p *parser) scanBlockScalar(ind int, style Style) (string, error) {
+func (p *parser) scanBlockScalar(ind int, style Style) (string, int8, bool, error) {
 	folded := style == StFolded
 	sline, scol := p.s.line, p.s.col
 	p.s.next()
 	chomp, incr, err := p.blockIndicators(sline, scol)
 	if err != nil {
-		return "", err
+		return "", 0, false, err
 	}
 	p.skipBlanks()
 	if !p.atLineEnd() {
-		return "", p.s.errf("a block scalar header takes only a comment, not %q", p.s.rest())
+		return "", 0, false, p.s.errf("a block scalar header takes only a comment, not %q", p.s.rest())
 	}
 	if err := p.endLine(); err != nil {
-		return "", err
+		return "", 0, false, err
 	}
 
 	// Section 8.1.1.1: the indentation indicator is relative to the parent
@@ -288,7 +288,7 @@ func (p *parser) scanBlockScalar(ind int, style Style) (string, error) {
 		// lines to contain more spaces than the first non-empty line".
 		if maxEmpty > indent {
 			p.reset(deepest)
-			return "", p.s.errf("a leading empty line of this block scalar is indented more than its first content line")
+			return "", 0, false, p.s.errf("a leading empty line of this block scalar is indented more than its first content line")
 		}
 	} else {
 		indent = minIndent + incr - 1
@@ -329,7 +329,7 @@ func (p *parser) scanBlockScalar(ind int, style Style) (string, error) {
 	if chomp > 0 {
 		out = append(out, breaks...)
 	}
-	return string(out), nil
+	return string(out), int8(chomp), incr != 0, nil
 }
 
 // blockIndicators reads the chomping and indentation indicators, in either

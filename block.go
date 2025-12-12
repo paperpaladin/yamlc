@@ -119,7 +119,7 @@ func (p *parser) parseBlockMap(ind int, firstKey *Node, n *Node) (*Node, error) 
 				return nil, err
 			}
 		}
-		n.Map = append(n.Map, Pair{Key: key, Val: val})
+		n.Map = append(n.Map, Pair{Key: key, Val: val, Explicit: explicit})
 
 		m := p.mark()
 		if err := p.skipPrefix(); err != nil {

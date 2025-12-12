@@ -141,6 +141,12 @@ func main() {
 		os.Exit(cmdJSON(o))
 	case "dump":
 		os.Exit(cmdDump(o))
+	case "scalars":
+		os.Exit(cmdScalars(o))
+	case "diverge":
+		os.Exit(cmdDiverge(o))
+	case "counts":
+		os.Exit(cmdCounts(o))
 	default:
 		fmt.Fprintf(os.Stderr, "yamlc: no such command: %s\n", cmd)
 		os.Exit(2)

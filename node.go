@@ -42,6 +42,8 @@ func (s Style) char() string {
 // collection, which is what the explicit key indicator is for.
 type Pair struct {
 	Key, Val *Node
+	// Explicit: written with the "?" indicator rather than as "key:".
+	Explicit bool
 }
 
 type Node struct {
@@ -55,8 +57,15 @@ type Node struct {
 	Seq    []*Node
 	Map    []Pair
 	Alias  string // without the '*'
-	Line   int
-	Col    int // 1 based, for reports
+	// Chomp is -1 strip, 0 clip, 1 keep, for a block scalar.
+	Chomp int8
+	// IndentGiven: the block scalar carried an explicit indentation
+	// indicator such as |2.
+	IndentGiven bool
+	// MultiLine: a plain or quoted scalar that spanned a line break.
+	MultiLine bool
+	Line      int
+	Col       int // 1 based, for reports
 }
 
 // Document is one document of a stream.
