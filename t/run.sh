@@ -628,6 +628,55 @@ r12 "dup-int-float" '{1: a, 1.0: b}\n' '{int 1: str a, float 3ff0000000000000: s
 r12 "dup-schema-11"  '{yes: 1, true: 2}\n' '{str yes: int 1, true: int 2}'
 dup_schema11 "dup-schema-11-refused" '{yes: 1, true: 2}\n'
 
+# --- implicit key length, and a trailing tab --------------------------
+#
+# The note in section 7.4.2: "implicit keys are restricted to a single line
+# and must not span more than 1024 Unicode characters". PyYAML enforces it
+# too, with "simple key is too long", so the boundary is checked on both
+# sides of it.
+LONGKEY=$(python3 -c 'print("x"*1030, end="")')
+SHORTKEY=$(python3 -c 'print("x"*1020, end="")')
+refuse "key-too-long"  '1:1' "$LONGKEY: 1\n"
+accept "key-just-fits"       "$SHORTKEY: 1\n"
+refuse "key-too-long-flow" '1:2' "{$LONGKEY: 1}\n"
+
+# A trailing tab after a plain scalar. nb-ns-plain-in-line allows s-white
+# between plain characters and the trailing run is trimmed by the folding
+# rules, so this is a document in 1.2. PyYAML refuses it with "while
+# scanning for the next token".
+accept_only "trailing-tab" 'a: 1 \nb: 2\t\n'
+ev_diff "trailing-tab-ev" 'a: 1 \nb: 2\t\n'
+
+# --- documents the task named, which no generator produces ------------
+ev "hand-nested-dash"  '- - -\n'
+ev "hand-tag-on-null"  '!!null ~\n'
+ev "hand-tag-empty"    'a: !!null\n'
+ev "hand-tag-str-key"  '? !!str a\n: b\n'
+ev "hand-anchor-empty" 'a: &x\nb: *x\n'
+ev "hand-binary"       '- !!binary QUJD\n'
+ev "hand-marker-in-block" '--- |\n  ---\n'
+ev "hand-comment-in-folded" 'a: >\n  x\n  # not a comment\n'
+ev "hand-comment-before-val" 'a:\n  # c\n  b: 1\n'
+ev "hand-comment-after-dash" '- # c\n  a\n'
+ev "hand-blank-before-val" 'a:\n\n  b: 1\n'
+ev "hand-blanks-after-block" 'a: |\n  x\n\n\nb: 2\n'
+res "hand-binary-value" '- !!binary QUJD\n'
+
+# An alias whose anchor is defined later in the document. Section 3.2.2.2
+# scopes an anchor from its definition onwards, so this is a refusal and
+# not a forward reference.
+refuse_res "alias-before-anchor" 'a: *x\nb: &x 1\n'
+refuse_at  "alias-before-anchor" '1:4' 'a: *x\nb: &x 1\n'
+
+# An alias cycle. Refused rather than followed: a reader that follows one
+# does not return. PyYAML builds the cycle happily, so its own dump of it
+# recurses, which is why the oracle call here is on the parse and the
+# refusal is ours.
+refuse_at "cycle-flow-seq" '1:5' '&a [*a]\n'
+refuse_at "cycle-flow-map" '1:8' '&a {b: *a}\n'
+refuse_at "cycle-block"    '5:5' '&a\n- x\n- &b\n  - y\n  - *a\n'
+refuse_at "cycle-as-key"   '1:7' '&a {? *a : 1}\n'
+
 # --- the json oracle --------------------------------------------------
 #
 # YAML 1.2 is a strict superset of JSON, so this is the one comparison in
@@ -704,13 +753,14 @@ for f in laughs.yaml deep-flow-seq.yaml deep-flow-map.yaml deep-block-seq.yaml \
 	deep-block-map.yaml deep-flow-unclosed.yaml cycle-seq.yaml cycle-map.yaml \
 	cycle-nested.yaml cycle-deep.yaml cycle-key.yaml alias-undefined.yaml \
 	alias-later.yaml open-quote.yaml open-dquote.yaml open-flow-seq.yaml \
-	open-flow-map.yaml open-verbatim-tag.yaml tab-indent.yaml tab-seq.yaml; do
+	open-flow-map.yaml open-verbatim-tag.yaml tab-indent.yaml tab-seq.yaml \
+	long-key.yaml; do
 	eq "hostile/refuse/$f" "err" "$(hfile $f)"
 done
 
 # ... and the ones that must still be read, so that the limits are
 # boundaries and not a wall everything hits.
-for f in laughs-small.yaml anchor-huge.yaml long-line.yaml long-key.yaml \
+for f in laughs-small.yaml anchor-huge.yaml long-line.yaml \
 	many-keys.yaml many-anchors.yaml many-aliases.yaml many-docs.yaml; do
 	eq "hostile/read/$f" "ok" "$(hfile $f)"
 done

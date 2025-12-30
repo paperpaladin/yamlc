@@ -100,6 +100,7 @@ func (p *parser) flowSkip(ind, oline, ocol int, closing byte) error {
 // ns-flow-pair or ns-flow-node, so "[a: 1]" is a sequence of one mapping.
 func (p *parser) flowSeqEntry(ind, oline, ocol int, closing byte) (*Node, error) {
 	line, col := p.s.line, p.s.col
+	startPos := p.s.pos
 	if p.s.peek(0) == '?' && (spaceOrEnd(p.s.peek(1)) || isFlowEnd(p.s.peek(1))) {
 		p.s.next()
 		pr, err := p.flowExplicitPair(ind, oline, ocol, closing)
@@ -124,6 +125,9 @@ func (p *parser) flowSeqEntry(ind, oline, ocol int, closing byte) (*Node, error)
 		p.skipBlanks()
 	}
 	if p.s.peek(0) == ':' && (jsonLike || spaceOrEnd(p.s.peek(1)) || isFlowEnd(p.s.peek(1))) {
+		if err := p.checkKeyLength(startPos, line, col); err != nil {
+			return nil, err
+		}
 		p.s.next()
 		val, err := p.flowValue(ind, oline, ocol, closing)
 		if err != nil {
@@ -147,6 +151,7 @@ func (p *parser) flowMapEntry(ind, oline, ocol int, closing byte) (Pair, error) 
 		val, err := p.flowValue(ind, oline, ocol, closing)
 		return Pair{Key: key, Val: val}, err
 	}
+	kline, kcol, kpos := p.s.line, p.s.col, p.s.pos
 	key, jsonLike, err := p.flowNode(ind, oline, ocol, closing)
 	if err != nil {
 		return Pair{}, err
@@ -159,6 +164,9 @@ func (p *parser) flowMapEntry(ind, oline, ocol int, closing byte) (Pair, error) 
 		p.skipBlanks()
 	}
 	if p.s.peek(0) == ':' && (jsonLike || spaceOrEnd(p.s.peek(1)) || isFlowEnd(p.s.peek(1))) {
+		if err := p.checkKeyLength(kpos, kline, kcol); err != nil {
+			return Pair{}, err
+		}
 		p.s.next()
 		val, err := p.flowValue(ind, oline, ocol, closing)
 		return Pair{Key: key, Val: val}, err

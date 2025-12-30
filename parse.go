@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"unicode/utf8"
 )
 
 // defaultMaxDepth bounds how deeply nested a document may be. A parser is a
@@ -561,6 +562,7 @@ func (pr props) split(line, here int) (keyP, mapP props, ind int) {
 func (p *parser) blockContent(c blockCtx, pr props, line, col int) (*Node, error) {
 	ch := p.s.peek(0)
 	here := p.s.col
+	startPos := p.s.pos
 	n := &Node{Kind: KScalar, Anchor: pr.anchor, Tag: pr.tag, TagRaw: pr.tagRaw,
 		Line: line, Col: col + 1}
 	// A block collection after inline properties is not a production:
@@ -633,6 +635,9 @@ func (p *parser) blockContent(c blockCtx, pr props, line, col int) (*Node, error
 		if multi {
 			return nil, p.s.errAt(line, col, "a mapping key written like this must be on one line")
 		}
+		if err := p.checkKeyLength(startPos, line, col); err != nil {
+			return nil, err
+		}
 		if err := blockOK("block mapping"); err != nil {
 			return nil, err
 		}
@@ -654,6 +659,20 @@ func (p *parser) blockContent(c blockCtx, pr props, line, col int) (*Node, error
 		return nil, err
 	}
 	return n, nil
+}
+
+// maxSimpleKey is the limit from the note in section 7.4.2: "implicit keys
+// are restricted to a single line and must not span more than 1024 Unicode
+// characters". It is a real restriction and not advice, and PyYAML
+// enforces it too, with "simple key is too long".
+const maxSimpleKey = 1024
+
+func (p *parser) checkKeyLength(startPos, line, col int) error {
+	if utf8.RuneCount(p.s.b[startPos:p.s.pos]) > maxSimpleKey {
+		return p.s.errAt(line, col,
+			"an implicit mapping key may not span more than %d characters", maxSimpleKey)
+	}
+	return nil
 }
 
 // plainFirst reports whether a plain scalar may begin with this character.

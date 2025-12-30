@@ -146,6 +146,7 @@ func (p *parser) parseBlockMap(ind int, firstKey *Node, n *Node) (*Node, error) 
 // one.
 func (p *parser) parseKeyNode(ind int) (*Node, error) {
 	line, col := p.s.line, p.s.col
+	startPos := p.s.pos
 	n := &Node{Line: line, Col: col + 1}
 	for p.s.peek(0) == '&' || p.s.peek(0) == '!' {
 		if p.s.peek(0) == '&' {
@@ -178,6 +179,9 @@ func (p *parser) parseKeyNode(ind int) (*Node, error) {
 	}
 	if multi {
 		return nil, p.s.errAt(line, col, "a mapping key written like this must be on one line")
+	}
+	if err := p.checkKeyLength(startPos, line, col); err != nil {
+		return nil, err
 	}
 	return n, nil
 }
