@@ -2,6 +2,19 @@ package main
 
 import "strings"
 
+// A quoted scalar's continuation lines ARE checked for indentation, unlike
+// the inside of a flow collection. s-l+flow-in-block(n) is
+// s-separate(n+1) ns-flow-node(n+1), so a flow scalar that is the value of
+// a mapping at indentation m must have its continuation lines at m+1 or
+// deeper, and the check below is exactly that.
+//
+// This was relaxed for a while because the differential fuzzer refused 67
+// documents out of 500 on it. Every one of those was the generator's
+// fault: it wrote a two-space continuation line whatever the nesting
+// depth. Relaxing it also made two parsers disagree about the STRUCTURE of
+// a document neither should have read, which is the better argument for
+// keeping it.
+
 // scanSingle reads a single-quoted scalar. Section 7.3.2: the only escape
 // is a doubled quote, and the line folding is the same as a plain scalar's.
 func (p *parser) scanSingle(ind int) (string, bool, error) {

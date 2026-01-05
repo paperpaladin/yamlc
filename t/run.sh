@@ -737,6 +737,30 @@ eq "yamlcorpus/enough"        "yes" "$([ "$(yget ev-same)" -gt 600 ] && echo yes
 eq "yamlcorpus/val-differ-native-only" "" \
 	"$(sed -n 's/^val-\(differ\|refused\) //p' "$YC" | grep -v '^native-' | grep -v '^[0-9]*$' | tr '\n' ' ')"
 
+# --- the differential fuzzer ------------------------------------------
+#
+# The cases above are cases somebody thought of. This builds documents
+# from the grammar instead and compares both parsers on every one: the
+# event stream, and the 1.1 values. The seed is fixed so that the suite is
+# repeatable and a failure is reproducible; YAMLC_FUZZ_SEED overrides it,
+# and YAMLC_FUZZ_COUNT makes the run longer.
+FZ=$W/o/fuzzcmp.out
+python3 t/fuzzcmp.py $Y t/corpus/fuzz --count "${YAMLC_FUZZ_COUNT:-1500}" \
+	--seed "${YAMLC_FUZZ_SEED:-7}" > "$FZ" || exit 2
+fget() { sed -n "s/^$1 //p" "$FZ"; }
+echo "fuzzer: seed $(fget seed), $(fget documents) documents, events $(fget ev-same) same $(fget ev-differ) differ, values $(fget val-same) same $(fget val-differ) differ"
+eq "fuzz/ev-differ"      "0" "$(fget ev-differ)"
+eq "fuzz/ev-yamlc-only"  "0" "$(fget ev-yamlc-only)"
+eq "fuzz/ev-pyyaml-only" "0" "$(fget ev-pyyaml-only)"
+eq "fuzz/val-differ"     "0" "$(fget val-differ)"
+eq "fuzz/val-yamlc-only" "0" "$(fget val-yamlc-only)"
+eq "fuzz/enough"         "yes" "$([ "$(fget ev-same)" -gt 1000 ] && echo yes || echo no)"
+
+# Every document PyYAML has no value for and yamlc does must be the one
+# known cause: a collection used as a mapping key, which Python cannot
+# hash. A second cause appearing in that bucket turns this red.
+eq "fuzz/pyyaml-refusals-explained" "$(fget val-pyyaml-only)" "$(fget val-pyyaml-unhashable)"
+
 # --- hostile input ----------------------------------------------------
 HO=$W/o/hostile.out
 python3 t/hostile.py $Y t/corpus/hostile > "$HO" || exit 2
