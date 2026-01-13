@@ -677,6 +677,40 @@ refuse_at "cycle-flow-map" '1:8' '&a {b: *a}\n'
 refuse_at "cycle-block"    '5:5' '&a\n- x\n- &b\n  - y\n  - *a\n'
 refuse_at "cycle-as-key"   '1:7' '&a {? *a : 1}\n'
 
+# --- what the %YAML directive asks for --------------------------------
+#
+# A document carrying %YAML 1.1 is asking for the 1.1 resolution rules.
+# yamlc honours that unless --schema says otherwise, and diverge reports
+# the directive itself as a finding, because a 1.2 processor is not
+# obliged to give a 1.1 document 1.1 semantics.
+eq "directive11/honoured" "true" \
+	"$($Y dump "$(doc dir11 '%YAML 1.1\n--- yes\n')")"
+eq "directive11/overridden" "str yes" \
+	"$($Y dump --schema=1.2 "$(doc dir11b '%YAML 1.1\n--- yes\n')")"
+eq "directive12/default" "str yes" \
+	"$($Y dump "$(doc dir12 '%YAML 1.2\n--- yes\n')")"
+eq "directive11/per-document" "true;str yes" \
+	"$($Y dump "$(doc dir11c '%YAML 1.1\n--- yes\n--- yes\n')" | tr '\n' ';' | sed 's/;$//')"
+
+# --- two more divergences the fuzzer found ----------------------------
+#
+# ns-plain-first in 7.3.3 allows "?" and ":" to begin a plain scalar when
+# what follows them is not whitespace, in flow context as well as block.
+# PyYAML's check_plain allows those two only when flow_level is zero, so
+# "[?x]" is a one-element sequence here and a single-pair mapping there.
+ev      "plain-question-block" '? x\n'
+ev_diff "plain-question-flow"  '[?x]\n'
+ev_diff "plain-colon-flow"     '[:x]\n'
+
+# PyYAML's mapping is a Python dict, so two keys that are distinct YAML
+# nodes and equal Python objects collide there and not here. This is not a
+# version difference and not a bug in either reader; it is the data model
+# of the host language showing through.
+res_diff "key-zero-false"  '{0: a, false: b}\n'
+res_diff "key-int-float"   '{5: a, 5.0: b}\n'
+res_diff "key-one-true"    '{1: a, true: b}\n'
+r12 "key-zero-false-1.2" '{0: a, false: b}\n' '{int 0: str a, false: str b}'
+
 # --- the json oracle --------------------------------------------------
 #
 # YAML 1.2 is a strict superset of JSON, so this is the one comparison in

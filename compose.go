@@ -21,8 +21,15 @@ const (
 const defaultBudget = 1000000
 
 type composer struct {
-	name    string
-	schema  int // 11 or 12
+	name string
+	// schema is the rules in force for the document being composed, and
+	// base is what to go back to for the next one. A %YAML directive's
+	// scope is the document it precedes (section 6.8.1), so a stream
+	// whose first document asks for 1.1 and whose second does not must
+	// read the second under 1.2. Keeping one field here read both
+	// documents as 1.1.
+	schema  int
+	base    int
 	dup     int
 	merge   bool
 	budget  int
@@ -39,7 +46,7 @@ func newComposer(name string, schema, dup int, merge bool, budget int) *composer
 	if budget <= 0 {
 		budget = defaultBudget
 	}
-	return &composer{name: name, schema: schema, dup: dup, merge: merge,
+	return &composer{name: name, schema: schema, base: schema, dup: dup, merge: merge,
 		budget: budget, anchors: map[string]*Node{}, busy: map[*Node]bool{}}
 }
 
@@ -53,6 +60,7 @@ func (c *composer) composeDocument(d *Document) (*Value, error) {
 	c.anchors = map[string]*Node{}
 	c.busy = map[*Node]bool{}
 	c.used = 0
+	c.schema = c.base
 	if d.Version == "1.1" && c.schemaFromDoc {
 		c.schema = 11
 	}
