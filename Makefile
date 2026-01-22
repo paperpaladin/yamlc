@@ -15,6 +15,12 @@ yamlc: $(wildcard *.go) go.mod
 test: all
 	./t/run.sh
 
+# One single edit to the parser at a time, rebuilt, with the whole suite
+# run against each. About half a minute per mutant. A group name does one
+# group: python3 t/mutants.py resolve
+mutants: all
+	python3 t/mutants.py
+
 vet:
 	$(GO) vet ./...
 
@@ -22,4 +28,4 @@ clean:
 	rm -f yamlc yamlc-mut
 	rm -rf t/corpus t/tmp
 
-.PHONY: all test vet clean
+.PHONY: all test mutants vet clean
