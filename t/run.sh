@@ -711,6 +711,49 @@ res_diff "key-int-float"   '{5: a, 5.0: b}\n'
 res_diff "key-one-true"    '{1: a, true: b}\n'
 r12 "key-zero-false-1.2" '{0: a, false: b}\n' '{int 0: str a, false: str b}'
 
+# --- cases that exist because a mutant survived without them ----------
+#
+# Each of these was added after t/mutants.py reported a survivor, and each
+# one kills exactly that mutant. The pattern is always the same: an
+# assertion that the document is ACCEPTED says nothing about what was read
+# out of it, and an assertion about a refusal elsewhere in the code says
+# nothing about this path.
+#
+# A CRLF pair is one line break (section 5.8). accept/crlf only checked
+# that the document parsed, and dropping the pair handling leaves it
+# parsing, with one more line break in every scalar.
+ev "crlf-block-scalar" '--- |\n  a\r\n  b\r\n'
+ev "crlf-plain-fold"   'a\r\nb\r\n'
+
+# The byte order mark is not content (section 5.2). accept/bom likewise
+# only checked that the document parsed.
+ev "bom-value"         '\357\273\277a b\n'
+
+# Columns count characters. Nothing asserted that until this case: every
+# other refusal is on a line of ASCII.
+refuse "col-after-multibyte" '1:4' 'a \343\201\202\007\n'
+
+# ns-plain-first excludes "#", so a flow entry cannot begin with one.
+refuse "flow-hash-first"  '1:1' '[#x]\n'
+
+# In flow context a ":" followed by a flow indicator ends the plain
+# scalar, so the key here is "a" and not "a:".
+ev "flow-colon-brace"   '{a:}\n'
+ev "flow-colon-bracket" '[a:]\n'
+
+# A single-quoted key is JSON-like, so its colon needs no space.
+ev "flow-sq-adjacent"   "{'a':1}\n"
+
+# A tab where the indentation of a mapping value belongs. The existing
+# tab case goes through the stream prefix; this one goes through the
+# node-content path, which is a different line of code.
+refuse "tab-as-value-indent" '2:1' 'a:\n\tb\n'
+
+# s-l+flow-in-block(n) is s-separate(n+1) ns-flow-node(n+1), so a quoted
+# scalar inside a sequence at column 2 must continue at column 3 or
+# deeper. PyYAML does not check this at all and reads the document.
+refuse_only "quoted-dedent" '2:5' "a:\n  - 'x\n b'\n"
+
 # --- the json oracle --------------------------------------------------
 #
 # YAML 1.2 is a strict superset of JSON, so this is the one comparison in
