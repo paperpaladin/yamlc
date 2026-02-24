@@ -76,11 +76,23 @@ func (p *parser) parseFlow(n *Node, ind int) error {
 // flowSkip consumes separation inside a flow collection: blanks, comments
 // and line breaks. A document marker at column zero means the collection
 // was never closed, which is reported against the opening bracket.
+//
+// A "#" is a comment only where a comment can start, which is at the
+// beginning of a line or after whitespace. This used to treat every "#"
+// as a comment, so "[#x]" was refused for the wrong reason, as an
+// unclosed bracket at end of input rather than as a node that cannot
+// begin with a hash. Nothing noticed until a mutant that let "#" begin a
+// plain scalar survived: the exclusion in plainFirst was unreachable,
+// because this function ate the character first.
 func (p *parser) flowSkip(ind, oline, ocol int, closing byte) error {
 	for {
-		p.skipBlanks()
+		blanks := p.s.col == 0
+		for isBlank(p.s.peek(0)) {
+			p.s.next()
+			blanks = true
+		}
 		switch {
-		case p.s.peek(0) == '#':
+		case p.s.peek(0) == '#' && blanks:
 			p.skipLine()
 		case p.s.peek(0) == '\n':
 			p.s.next()

@@ -729,12 +729,20 @@ ev "crlf-plain-fold"   'a\r\nb\r\n'
 # only checked that the document parsed.
 ev "bom-value"         '\357\273\277a b\n'
 
-# Columns count characters. Nothing asserted that until this case: every
-# other refusal is on a line of ASCII.
+# Columns count characters, and the cursor has to agree with the input
+# validator about that. The first case is the validator's own count and
+# the second is the parser's, after a three-byte character: a mutant that
+# counted bytes in the cursor survived the first on its own.
 refuse "col-after-multibyte" '1:4' 'a \343\201\202\007\n'
+refuse_dup "col-dup-multibyte" '1:8' '{\343\201\202: 1, \343\201\202: 2}\n'
 
-# ns-plain-first excludes "#", so a flow entry cannot begin with one.
-refuse "flow-hash-first"  '1:1' '[#x]\n'
+# ns-plain-first excludes "#", so a flow entry cannot begin with one. The
+# position matters: before the flow comment rule was tightened this was
+# refused as an unclosed bracket at 1:1, because the whole line had been
+# eaten as a comment, and the exclusion in plainFirst was unreachable.
+refuse "flow-hash-first"  '1:2' '[#x]\n'
+ev     "flow-hash-after-space" '[a, # c\n b]\n'
+ev     "flow-hash-in-plain"    '{a:#x}\n'
 
 # In flow context a ":" followed by a flow indicator ends the plain
 # scalar, so the key here is "a" and not "a:".
@@ -748,6 +756,11 @@ ev "flow-sq-adjacent"   "{'a':1}\n"
 # tab case goes through the stream prefix; this one goes through the
 # node-content path, which is a different line of code.
 refuse "tab-as-value-indent" '2:1' 'a:\n\tb\n'
+
+# And a tab where the indentation is shallower than the node it would
+# belong to, which is the one path to that refusal that the stream prefix
+# does not reach first.
+refuse "tab-shallower"       '3:2' 'a:\n  b:\n \tc\n'
 
 # s-l+flow-in-block(n) is s-separate(n+1) ns-flow-node(n+1), so a quoted
 # scalar inside a sequence at column 2 must continue at column 3 or
