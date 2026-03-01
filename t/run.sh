@@ -767,6 +767,45 @@ refuse "tab-shallower"       '3:2' 'a:\n  b:\n \tc\n'
 # deeper. PyYAML does not check this at all and reads the document.
 refuse_only "quoted-dedent" '2:5' "a:\n  - 'x\n b'\n"
 
+# --- UTF-16 and UTF-32 input (section 5.2) ----------------------------
+#
+# A stream may be in any of the three encodings and a processor must work
+# out which from the first bytes. PyYAML's reader knows the two UTF-16
+# marks and the UTF-8 one, so a UTF-16 stream WITH a mark can be compared
+# against it; the four other cases are ours alone and are asserted
+# against the UTF-8 spelling of the same document.
+enc() {
+	python3 -c "import sys;sys.stdout.buffer.write($2)" > "$W/d/$1"
+	echo "$W/d/$1"
+}
+
+for e in "b'\\xff\\xfe'+'a: b\\n'.encode('utf-16-le')|utf16le-bom" \
+	"b'\\xfe\\xff'+'a: b\\n'.encode('utf-16-be')|utf16be-bom" \
+	"'a: b\\n'.encode('utf-16-le')|utf16le-bare" \
+	"'a: b\\n'.encode('utf-16-be')|utf16be-bare" \
+	"b'\\xff\\xfe\\x00\\x00'+'a: b\\n'.encode('utf-32-le')|utf32le-bom" \
+	"b'\\x00\\x00\\xfe\\xff'+'a: b\\n'.encode('utf-32-be')|utf32be-bom" \
+	"'a: b\\n'.encode('utf-32-le')|utf32le-bare" \
+	"'a: b\\n'.encode('utf-32-be')|utf32be-bare"; do
+	expr=${e%|*}; nm=${e#*|}
+	f=$(enc "enc-$nm" "$expr")
+	eq "encoding/$nm" "{str a: str b}" "$($Y dump "$f" 2>&1)"
+done
+
+# The two PyYAML knows about must agree with it on the event stream too,
+# which is the only outside check on any of this.
+for nm in utf16le-bom utf16be-bom; do
+	f=$W/d/enc-$nm
+	eq "encoding/$nm/pyyaml" "$(python3 t/pyyaml.py events "$f" 2>/dev/null)" "$($Y events "$f" 2>&1)"
+done
+
+# A UTF-16 stream carrying half a surrogate pair, and one whose length is
+# not a whole number of units.
+f=$(enc "enc-lone-high" "b'\\xff\\xfe\\x00\\xd8a\\x00'")
+eq "encoding/lone-high" "$f:1:1" "$($Y check "$f" 2>&1 | sed 's/\(:[0-9]*:[0-9]*\).*/\1/')"
+f=$(enc "enc-odd-length" "b'\\xff\\xfea\\x00:'")
+eq "encoding/odd-length" "$f:1:1" "$($Y check "$f" 2>&1 | sed 's/\(:[0-9]*:[0-9]*\).*/\1/')"
+
 # --- the json oracle --------------------------------------------------
 #
 # YAML 1.2 is a strict superset of JSON, so this is the one comparison in
