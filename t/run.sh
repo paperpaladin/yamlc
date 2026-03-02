@@ -890,6 +890,32 @@ eq "fuzz/enough"         "yes" "$([ "$(fget ev-same)" -gt 1000 ] && echo yes || 
 # hash. A second cause appearing in that bucket turns this red.
 eq "fuzz/pyyaml-refusals-explained" "$(fget val-pyyaml-only)" "$(fget val-pyyaml-unhashable)"
 
+# --- how often this happens in files nobody wrote for the occasion ----
+#
+# The divergence report over the whole corpus. The numbers are printed
+# rather than asserted, because they are a property of this machine's
+# files; what IS asserted is that the report handles every document the
+# parser reads, since a reporter that refuses what the parser accepts
+# would make the measurement meaningless.
+DVJ=$W/o/diverge-json.out
+xargs $Y diverge --batch < t/corpus/system.list > "$DVJ" 2>/dev/null
+awk '/^files /{f+=$2} /^with-findings /{w+=$2} /^findings /{n+=$2} /^refused /{r+=$2}
+     END{printf "diverge over %d JSON files: %d with findings, %d findings, %d refused\n", f, w, n, r}' "$DVJ"
+eq "diverge/json-refused" "0" \
+	"$(awk '/^refused /{r+=$2} END{print r+0}' "$DVJ")"
+
+DVY=$W/o/diverge-yaml.out
+$Y diverge --batch t/corpus/yaml/* > "$DVY" 2>/dev/null
+awk '/^files /{f+=$2} /^with-findings /{w+=$2} /^findings /{n+=$2} /^refused /{r+=$2}
+     END{printf "diverge over %d generated YAML files: %d with findings, %d findings, %d refused\n", f, w, n, r}' "$DVY"
+
+# Two real JSON files on this machine hold numbers in exponent form, and
+# a 1.1 reader makes strings of them. The finding is kept here as a
+# document of its own so that it is still asserted on a machine without
+# those files.
+dv "dv-json-exponent" '{"a": 2E10, "b": 1e-09, "c": 0.5e5}\n' \
+	'1:7: scalar;1:18: scalar;1:30: scalar;'
+
 # --- hostile input ----------------------------------------------------
 HO=$W/o/hostile.out
 python3 t/hostile.py $Y t/corpus/hostile > "$HO" || exit 2

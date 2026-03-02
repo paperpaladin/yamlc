@@ -223,12 +223,30 @@ func report(name string, raw []byte, o *opts) (*reporter, error) {
 func cmdDiverge(o *opts) int {
 	rc := 0
 	total := map[string]int{}
+	withFindings := 0
 	for _, name := range o.files {
 		raw, err := readInput(name)
 		if err == nil {
 			var r *reporter
 			r, err = report(name, raw, o)
 			if err == nil {
+				if len(r.findings) > 0 {
+					withFindings++
+				}
+				// --batch is for measuring a corpus rather than reading
+				// one document: one line per file that has anything to
+				// say, and nothing at all for the files that do not.
+				if o.batch {
+					if len(r.findings) > 0 {
+						per := map[string]int{}
+						for _, f := range r.findings {
+							per[f.kind]++
+							total[f.kind]++
+						}
+						fmt.Printf("%s\t%d\t%s\n", name, len(r.findings), kindList(per))
+					}
+					continue
+				}
 				for _, f := range r.findings {
 					total[f.kind]++
 					fmt.Printf("%s:%d:%d: %s %s %s\n", name, f.line, f.col, f.kind, f.path, f.detail)
@@ -236,9 +254,27 @@ func cmdDiverge(o *opts) int {
 				continue
 			}
 		}
-		fmt.Printf("%s: refused: %v\n", name, err)
+		if o.batch {
+			fmt.Printf("%s\trefused\t%v\n", name, err)
+		} else {
+			fmt.Printf("%s: refused: %v\n", name, err)
+		}
 		total["refused"]++
 		rc = 1
+	}
+	if o.batch {
+		fmt.Printf("files %d\n", len(o.files))
+		fmt.Printf("with-findings %d\n", withFindings)
+		fmt.Printf("refused %d\n", total["refused"])
+		n := 0
+		for k, v := range total {
+			if k != "refused" {
+				n += v
+				fmt.Printf("kind-%s %d\n", k, v)
+			}
+		}
+		fmt.Printf("findings %d\n", n)
+		return rc
 	}
 	kinds := make([]string, 0, len(total))
 	n := 0
@@ -255,6 +291,15 @@ func cmdDiverge(o *opts) int {
 	}
 	fmt.Println()
 	return rc
+}
+
+func kindList(per map[string]int) string {
+	ks := make([]string, 0, len(per))
+	for k, v := range per {
+		ks = append(ks, fmt.Sprintf("%s=%d", k, v))
+	}
+	sort.Strings(ks)
+	return strings.Join(ks, " ")
 }
 
 func cmdScalars(o *opts) int {
