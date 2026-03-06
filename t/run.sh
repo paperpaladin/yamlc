@@ -806,6 +806,35 @@ eq "encoding/lone-high" "$f:1:1" "$($Y check "$f" 2>&1 | sed 's/\(:[0-9]*:[0-9]*
 f=$(enc "enc-odd-length" "b'\\xff\\xfea\\x00:'")
 eq "encoding/odd-length" "$f:1:1" "$($Y check "$f" 2>&1 | sed 's/\(:[0-9]*:[0-9]*\).*/\1/')"
 
+# --- more of the grammar, and one more divergence ---------------------
+ev "anchor-redefined"  '\055 &a 1\n\055 &a 2\n\055 *a\n'
+ev "tag-secondary-redefined" '%TAG !! tag:e.com,2000:\n--- !!foo x\n'
+ev "tag-verbatim-local" '!<!foo> x\n'
+ev "tag-verbatim-bang"  '!<!> x\n'
+ev "explicit-compact-key" '? a : b\n'
+ev "tag-on-empty-doc"   '--- !!str\n'
+ev "anchor-on-empty-doc" '--- &a\n'
+ev "block-scalar-empty" 'a: |\n'
+ev "flow-plain-fold"    '[a\n b]\n'
+ev "doc-comment-only"   '--- #c\n'
+ev "comment-at-col0"    'a:\n#c\nb: 1\n'
+ev "comment-in-seq"     '- a\n # c\n- b\n'
+ev "two-suffixes"       '--- a\n...\n...\n'
+ev "empty-doc-after"    'a: 1\n---\n'
+
+refuse "flow-key-next-line" '2:3' '{a: b\n c: d}\n'
+
+# An alias may not name an anchor in a previous document: section 3.2.2.2
+# scopes an anchor to the document it is in, and both readers refuse.
+refuse_res "alias-across-documents" '&a 1\n--- *a\n'
+refuse_at  "alias-across-documents" '2:5' '&a 1\n--- *a\n'
+
+# An anchor may be redefined, and an alias takes the most recent
+# definition before it. PyYAML refuses the document outright with
+# "found duplicate anchor".
+res_diff "anchor-redefined-value" '\055 &a 1\n\055 &a 2\n\055 *a\n'
+r12 "anchor-redefined-12" '\055 &a 1\n\055 &a 2\n\055 *a\n' '[int 1, int 2, int 2]'
+
 # --- the json oracle --------------------------------------------------
 #
 # YAML 1.2 is a strict superset of JSON, so this is the one comparison in
