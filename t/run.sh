@@ -257,6 +257,12 @@ dup_schema11() {
 	esac
 }
 
+# go vet is a gate here rather than a separate target nobody runs. It
+# costs about a second and it has caught a printf verb mismatch in this
+# project already.
+GOPROXY=off GOTOOLCHAIN=local go vet ./... 2>"$W/o/vet.err"
+if [ $? -eq 0 ]; then ok "go vet"; else bad "go vet"; cat "$W/o/vet.err"; fi
+
 status "usage/no-args"      2 $Y
 status "usage/bad-command"  2 $Y nonesuch
 status "usage/check-nofile" 2 $Y check
@@ -834,6 +840,26 @@ refuse_at  "alias-across-documents" '2:5' '&a 1\n--- *a\n'
 # "found duplicate anchor".
 res_diff "anchor-redefined-value" '\055 &a 1\n\055 &a 2\n\055 *a\n'
 r12 "anchor-redefined-12" '\055 &a 1\n\055 &a 2\n\055 *a\n' '[int 1, int 2, int 2]'
+
+# --- the round trip the fuzz target checks, as fixed cases ------------
+#
+# yamlc json output is JSON, and JSON is YAML, so reading it back must
+# give the same value. Both of these were found by go test -fuzz and are
+# kept here so that make test sees them without a fuzz run.
+roundtrip() {
+	f=$(doc "$1" "$2")
+	a=$($Y dump "$f" 2>&1)
+	$Y json "$f" > "$W/d/$1.json" 2>&1
+	b=$($Y dump "$W/d/$1.json" 2>&1)
+	eq "roundtrip/$1" "$a" "$b"
+}
+
+roundtrip "rt-c1-escape"   '"\\x80"\n'
+roundtrip "rt-del-escape"  '"\\x7f"\n'
+roundtrip "rt-nul-escape"  '"\\0"\n'
+roundtrip "rt-noncharacter" '"\\ufffe"\n'
+roundtrip "rt-surrogate"   '"\\ud800"\n'
+roundtrip "rt-mixed"       'a: [1, 2.5, "x\\ty", null, true, 99999999999999999999]\n'
 
 # --- the json oracle --------------------------------------------------
 #

@@ -7,3 +7,6 @@
 t/corpus/
 t/tmp/
 __pycache__/
+# go test -fuzz writes a failing input here; the ones worth keeping are
+# f.Add seeds in fuzz_test.go instead, where they can carry a comment.
+testdata/

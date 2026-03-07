@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // JSON output. This exists so that the one thing this project is not
@@ -135,7 +136,7 @@ func jsonString(b *strings.Builder, s string) {
 		case c == 0x0c:
 			b.WriteString(`\f`)
 			i++
-		case c < 0x20:
+		case c < 0x20 || c == 0x7f:
 			fmt.Fprintf(b, `\u%04x`, c)
 			i++
 		case c == 0xed && i+2 < len(s) && s[i+1] >= 0xa0 && s[i+1] <= 0xbf:
@@ -143,9 +144,24 @@ func jsonString(b *strings.Builder, s string) {
 			cp := rune(0xd000) | rune(s[i+1]&0x3f)<<6 | rune(s[i+2]&0x3f)
 			fmt.Fprintf(b, `\u%04x`, cp)
 			i += 3
-		default:
+		case c < 0x80:
 			b.WriteByte(c)
 			i++
+		default:
+			// A character JSON allows raw and YAML cannot hold raw gets
+			// an escape, so that this writer's output is readable by this
+			// parser. Python's json reads the escape and the raw byte as
+			// the same character either way, so the oracle does not care;
+			// what cares is the round trip, which found "\x80" through a
+			// double-quoted scalar. Escapes may legitimately produce a
+			// character outside c-printable, since \0 is one of them.
+			r, w := utf8.DecodeRuneInString(s[i:])
+			if !printable(r) {
+				fmt.Fprintf(b, `\u%04x`, r)
+			} else {
+				b.WriteString(s[i : i+w])
+			}
+			i += w
 		}
 	}
 	b.WriteByte('"')

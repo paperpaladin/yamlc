@@ -21,11 +21,17 @@ test: all
 mutants: all
 	python3 t/mutants.py
 
+# Coverage-guided fuzzing, which the byte-level sweep in t/hostile.py is
+# not. Thirty seconds by default; FUZZTIME=10m for longer.
+FUZZTIME ?= 30s
+fuzz: all
+	$(GO) test -run=XXX -fuzz=FuzzParse -fuzztime=$(FUZZTIME) .
+
 vet:
 	$(GO) vet ./...
 
 clean:
 	rm -f yamlc yamlc-mut
-	rm -rf t/corpus t/tmp
+	rm -rf t/corpus t/tmp testdata
 
-.PHONY: all test mutants vet clean
+.PHONY: all test mutants fuzz vet clean
