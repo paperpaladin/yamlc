@@ -21,7 +21,21 @@ func readInput(name string) ([]byte, error) {
 func cmdCheck(o *opts) int {
 	bad := 0
 	for _, name := range o.files {
-		if _, _, err := o.load(name); err != nil {
+		_, _, err := o.load(name)
+		// --batch gives one line per file whatever the answer, which is
+		// what a harness comparing a few hundred files wants. The plain
+		// form prints the refusal on its own, which is what a person
+		// running it on one file wants.
+		if o.batch {
+			if err != nil {
+				fmt.Printf("%s\terr\t%v\n", name, err)
+				bad++
+			} else {
+				fmt.Printf("%s\tok\t\n", name)
+			}
+			continue
+		}
+		if err != nil {
 			fmt.Println(err)
 			bad++
 			continue

@@ -999,6 +999,29 @@ for f in laughs-small.yaml anchor-huge.yaml long-line.yaml \
 	eq "hostile/read/$f" "ok" "$(hfile $f)"
 done
 
+# --- the YAML test suite ----------------------------------------------
+#
+# The YAML project's own conformance data, 402 cases, fetched once and
+# cached. PyYAML cannot settle a 1.2 question because it implements 1.1,
+# and the json module only covers the JSON subset; this is the first
+# oracle here that speaks for YAML 1.2 across the whole grammar.
+#
+# Without a network and without a cached copy the section prints a skip
+# and runs nothing. That is deliberate: this is one oracle among four, so
+# a missing one is a loud gap rather than a refusal to run at all.
+TS=$W/o/yts.out
+python3 t/yts.py $Y t/corpus/yts > "$TS" || exit 2
+tget() { sed -n "s/^$1 //p" "$TS"; }
+if [ -n "$(tget unavailable)" ]; then
+	echo "SKIP yaml test suite: $(tget unavailable)"
+else
+	echo "yaml test suite: $(tget cases) cases, $(tget read) read, $(tget refused) refused, $(tget known) known failures"
+	eq "yts/digest"     "yes" "$(tget digest-match)"
+	eq "yts/cases"      "402" "$(tget cases)"
+	eq "yts/unexpected" "0"   "$(tget unexpected-count)"
+	eq "yts/fixed"      "0"   "$(tget fixed-count)"
+fi
+
 # --- the divergence report --------------------------------------------
 #
 # The deliverable. Each kind of finding is asserted on a document written

@@ -27,7 +27,7 @@ options, where they apply:
   --merge=on|off     honour the << merge key (default on)
   --max-depth=N      refuse nesting deeper than this (default 400)
   --max-nodes=N      refuse an expansion larger than this (default 1000000)
-  --batch            json and dump only: one tab separated line per
+  --batch            check, json and dump: one tab separated line per
                      document, naming the file, so a corpus of thousands
                      costs one process
 `
