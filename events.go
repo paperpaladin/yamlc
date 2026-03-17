@@ -17,14 +17,14 @@ import (
 //
 //	+STR
 //	+DOC ---            --- only when the document said so
-//	+MAP {}             {} only when the mapping was written in flow form
+//	+MAP {} &a <tag>    {} only when the mapping was written in flow form
 //	=VAL &a <tag> :v    style is : ' " | or >
 //	=ALI *a
 //	-MAP
 //	-DOC ...
 //	-STR
 //
-// t/eventcmp.py prints the same shape from PyYAML's own event stream. The
+// t/pyyaml.py prints the same shape from PyYAML's own event stream. The
 // escaping of a value is defined in escapeEvent below and implemented
 // twice, once there and once here; it is a presentation detail, and the
 // values themselves are checked a second time by the json oracle, which
@@ -69,7 +69,7 @@ func writeNodeEvents(w io.Writer, n *Node) {
 		if n.Flow {
 			flow = " []"
 		}
-		fmt.Fprintf(w, "+SEQ%s%s\n", eventProps(n), flow)
+		fmt.Fprintf(w, "+SEQ%s%s\n", flow, eventProps(n))
 		for _, c := range n.Seq {
 			writeNodeEvents(w, c)
 		}
@@ -79,7 +79,7 @@ func writeNodeEvents(w io.Writer, n *Node) {
 		if n.Flow {
 			flow = " {}"
 		}
-		fmt.Fprintf(w, "+MAP%s%s\n", eventProps(n), flow)
+		fmt.Fprintf(w, "+MAP%s%s\n", flow, eventProps(n))
 		for _, pr := range n.Map {
 			writeNodeEvents(w, pr.Key)
 			writeNodeEvents(w, pr.Val)
@@ -88,11 +88,14 @@ func writeNodeEvents(w io.Writer, n *Node) {
 	}
 }
 
-// escapeEvent makes a scalar printable on one line. Backslash, the line
-// break and the tab go to their C escapes; every other control character
-// and every surrogate code point goes to \uXXXX. A surrogate can only be
-// here because a double-quoted scalar escaped one, which YAML does not
-// define and JSON does; see the note in scalar.go.
+// escapeEvent makes a scalar printable on one line. Backslash, the two
+// line breaks, the tab and the backspace go to their C escapes; every
+// other control character and every surrogate code point goes to \uXXXX.
+// Those five are the only escapes the YAML test suite's own expected
+// output uses, so a yamlc event line and a test suite event line compare
+// as bytes. A surrogate can only be here because a double-quoted scalar
+// escaped one, which YAML does not define and JSON does; see the note in
+// scalar.go.
 func escapeEvent(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); {
@@ -107,6 +110,8 @@ func escapeEvent(s string) string {
 				b.WriteString(`\r`)
 			case c == '\t':
 				b.WriteString(`\t`)
+			case c == '\b':
+				b.WriteString(`\b`)
 			case c < 0x20 || c == 0x7f:
 				fmt.Fprintf(&b, `\u%04X`, c)
 			default:

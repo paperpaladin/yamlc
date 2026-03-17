@@ -40,9 +40,10 @@ def cmd_accept(path):
 
 
 def escape(v):
-    """The escaping yamlc's events.go describes. Kept deliberately small:
-    backslash, break and tab go to C escapes, every other control character
-    and every surrogate goes to \\uXXXX, and the rest is raw UTF-8."""
+    """The escaping yamlc's events.go describes, which is the YAML test
+    suite's: backslash, the two breaks, tab and backspace go to C escapes,
+    every other control character and every surrogate goes to \\uXXXX, and
+    the rest is raw UTF-8."""
     out = []
     for ch in v:
         o = ord(ch)
@@ -54,6 +55,8 @@ def escape(v):
             out.append("\\r")
         elif ch == "\t":
             out.append("\\t")
+        elif ch == "\b":
+            out.append("\\b")
         elif o < 0x20 or o == 0x7F or 0xD800 <= o <= 0xDFFF:
             out.append("\\u%04X" % o)
         else:
@@ -100,13 +103,16 @@ def events_one(path):
                 out.append("=ALI *" + e.anchor)
             elif n in ("SequenceStartEvent", "MappingStartEvent"):
                 k = "+SEQ" if n[0] == "S" else "+MAP"
+                # Flow indicator first, then the anchor, then the tag.
+                # That order is the test suite's, and matching it lets the
+                # comparison in t/yts.py be a byte comparison.
                 p = ""
+                if e.flow_style:
+                    p += " []" if k == "+SEQ" else " {}"
                 if e.anchor:
                     p += " &" + e.anchor
                 if e.tag:
                     p += " <" + e.tag + ">"
-                if e.flow_style:
-                    p += " []" if k == "+SEQ" else " {}"
                 out.append(k + p)
             elif n == "SequenceEndEvent":
                 out.append("-SEQ")
