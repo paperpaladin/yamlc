@@ -56,13 +56,6 @@ KNOWN = {
     "FH7J": ("read", "a tag on an empty key, read as a tag on the mapping"),
     "PW8X": ("read", "an anchor on an empty key, read as one on the mapping"),
 
-    # A plain scalar may begin with ":" when what follows is not space,
-    # in flow context as well as block.
-    "58MP": ("read", "plain scalar beginning with : as a flow map value"),
-    "5T43": ("read", "plain scalar beginning with : after a JSON-like key"),
-    "HM87/00": ("read", "plain scalar beginning with : in a flow sequence"),
-    "DBG4": ("read", "plain scalar beginning with :: in a flow sequence"),
-
     # The : of a flow mapping entry may be on a later line than its key.
     "4MUZ/02": ("read", "flow mapping colon on the line after a plain key"),
     "VJP3/01": ("read", "flow mapping colon on its own line"),

@@ -161,6 +161,14 @@ ev_diff() {
 	f=$(doc "$1" "$2")
 	a=$(python3 t/pyyaml.py events "$f" 2>/dev/null)
 	b=$($Y events "$f" 2>&1)
+	# yamlc has to READ the document. Without this line the case passes
+	# when yamlc refuses it, because a refusal differs from PyYAML's
+	# events just as a different reading does, and that is how
+	# plain-colon-flow sat green for a week while "[:x]" was refused.
+	case "$b" in
+	"+STR"*) ;;
+	*) bad "ev1.2/$1: yamlc does not read it: $b"; return ;;
+	esac
 	if [ "$a" = "$b" ]; then
 		bad "ev1.2/$1: PyYAML now agrees, so this is no longer a divergence"
 	else
@@ -707,6 +715,8 @@ eq "directive11/per-document" "true;str yes" \
 ev      "plain-question-block" '? x\n'
 ev_diff "plain-question-flow"  '[?x]\n'
 ev_diff "plain-colon-flow"     '[:x]\n'
+ev_diff "plain-colon-flow-value" '{x: :x}\n'
+ev      "plain-colon-json-key"  '{\"k\"::v}\n'
 
 # PyYAML's mapping is a Python dict, so two keys that are distinct YAML
 # nodes and equal Python objects collide there and not here. This is not a

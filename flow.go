@@ -299,7 +299,14 @@ func (p *parser) flowNode(ind, oline, ocol int, closing byte) (*Node, bool, erro
 		return n, true, err
 	case ch == '|' || ch == '>':
 		return nil, false, p.s.errf("a block scalar cannot appear inside a flow collection")
-	case isFlowEnd(ch) || ch == ':':
+	case isFlowEnd(ch):
+		return n, false, nil
+	case ch == ':' && !plainFirst(ch, p.s.peek(1), true):
+		// A colon here is the mapping indicator of an entry with no
+		// key, so the node is empty: "{: 1}" and "[: 1]". A colon that
+		// ns-plain-first allows to begin a plain scalar is content
+		// instead, which is why "[:x]" is a one-element sequence
+		// holding ":x" and not a mapping from null to x.
 		return n, false, nil
 	}
 	n.Style = StPlain
