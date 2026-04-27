@@ -1015,7 +1015,7 @@ tget() { sed -n "s/^$1 //p" "$TS"; }
 if [ -n "$(tget unavailable)" ]; then
 	echo "SKIP yaml test suite: $(tget unavailable)"
 else
-	echo "yaml test suite: $(tget cases) cases, $(tget read) read, $(tget refused) refused, events $(tget event-same) same $(tget event-differ) differ, $(tget known) known failures"
+	echo "yaml test suite: $(tget cases) cases, $(tget read) read, $(tget refused) refused, events $(tget event-same) same $(tget event-differ) differ, json $(tget json-same) same $(tget json-differ) differ $(tget json-no-form) no JSON form, $(tget known) known failures"
 	eq "yts/digest"     "yes" "$(tget digest-match)"
 	eq "yts/cases"      "402" "$(tget cases)"
 	# A floor, not the exact figure, which moves every time a refusal
@@ -1023,6 +1023,12 @@ else
 	# this guards is the comparison running on a corpus at all.
 	eq "yts/event-enough" "yes" \
 		"$([ "$(tget event-same)" -gt 250 ] && echo yes || echo no)"
+	eq "yts/json-enough" "yes" \
+		"$([ "$(tget json-same)" -gt 220 ] && echo yes || echo no)"
+	# The only refusals allowed in the core schema comparison are the
+	# tags yamlc carries rather than interprets, which is a stated
+	# non-goal. A second cause arriving in that bucket turns this red.
+	eq "yts/json-no-form" "12" "$(tget json-no-form)"
 	eq "yts/unexpected" "0"   "$(tget unexpected-count)"
 	eq "yts/fixed"      "0"   "$(tget fixed-count)"
 fi

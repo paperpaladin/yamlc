@@ -22,7 +22,9 @@ the list that now passes as "fixed", and t/run.sh requires both to be
 zero, so neither a regression nor a quiet repair can pass unnoticed.
 """
 import hashlib
+import json
 import os
+import struct
 import subprocess
 import sys
 import tarfile
@@ -262,8 +264,109 @@ def main(argv):
     print("event-same %d" % evsame)
     print("event-differ %d" % evdiffer)
 
+    # in.json is what the 1.2 core schema must resolve the document to,
+    # which is the one thing in this project that had no outside
+    # authority at all: PyYAML answers for 1.1 and the json module only
+    # for documents that are already JSON.
+    # Three cases carry both an error marker and an in.json, left from
+    # when the suite still thought the document was valid. The marker
+    # wins: there is no right JSON for a document that must be refused.
+    withjson = [(cid, p) for cid, p in ids
+                if cid not in invalid
+                and os.path.exists(os.path.join(p, "in.json"))]
+    jpaths = [os.path.join(p, "in.yaml") for _, p in withjson]
+    jgot = batch(yamlc, "json", jpaths, ["--dup=last"])
+    jsame = jdiffer = jnotag = 0
+    for cid, p in withjson:
+        if cid in failures:
+            continue
+        with open(os.path.join(p, "in.json")) as f:
+            want = jsonvalues(f.read())
+        lines = jgot.get(os.path.join(p, "in.yaml"), [])
+        err = [b for s, b in lines if s == "err"]
+        if err:
+            # yamlc json refuses a node whose tag it does not interpret,
+            # and carrying tags rather than dispatching on them is a
+            # stated non-goal. Counted apart so that the number is
+            # visible and a new cause in this bucket turns the suite red.
+            if all("has no JSON form" in e for e in err):
+                jnotag += 1
+                continue
+            jdiffer += 1
+            failures[cid] = ("json", err[0])
+            continue
+        try:
+            mine = [json.loads(b) for s, b in lines if s == "ok"]
+        except ValueError as e:
+            jdiffer += 1
+            failures[cid] = ("json", "output is not JSON: %s" % e)
+            continue
+        if strict_same(want, mine):
+            jsame += 1
+        else:
+            jdiffer += 1
+            failures[cid] = ("json", "want %.90s got %.90s" % (want, mine))
+    print("json-cases %d" % len(withjson))
+    print("json-same %d" % jsame)
+    print("json-differ %d" % jdiffer)
+    print("json-no-form %d" % jnotag)
+
     report(failures)
     return 0
+
+
+def jsonvalues(s):
+    """in.json holds one JSON value per document, written end to end."""
+    dec = json.JSONDecoder()
+    out = []
+    i = 0
+    while True:
+        while i < len(s) and s[i].isspace():
+            i += 1
+        if i >= len(s):
+            return out
+        v, i = dec.raw_decode(s, i)
+        out.append(v)
+
+
+def strict_same(a, b):
+    """Compare two readings of a document, with two deliberate holes.
+
+    t/jsoncmp.py compares key order and compares a float by its bits,
+    because there the oracle is json.load over a JSON file and both of
+    those are properties of the document. Here the oracle is the suite's
+    in.json, which is generated, and neither property survived the
+    generator. Two cases prove it rather than two guesses:
+
+    RR7F is written a then d, its own test.event says a then d, and its
+    in.json says d then a. So in.json does not record key order and
+    comparing it would report a defect that the suite's other file
+    contradicts.
+
+    UGM3 writes price: 450.00, which the 1.2 core schema resolves to a
+    float, and its in.json says 450. So in.json does not separate an
+    integer from a float of the same value. What does separate them is
+    test.event, which keeps the scalar as written, and the json module
+    comparison over 2,753 documents, which is strict about type. Both
+    run here, so the hole is covered rather than merely accepted.
+    """
+    if isinstance(a, bool) != isinstance(b, bool):
+        return False
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        if isinstance(a, float) and isinstance(b, float):
+            if a != a and b != b:
+                return True
+            return struct.pack("<d", a) == struct.pack("<d", b)
+        return a == b
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        if set(a.keys()) != set(b.keys()):
+            return False
+        return all(strict_same(a[k], b[k]) for k in a)
+    if isinstance(a, list):
+        return len(a) == len(b) and all(strict_same(x, y) for x, y in zip(a, b))
+    return a == b
 
 
 def firstdiff(want, got):
