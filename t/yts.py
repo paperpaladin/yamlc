@@ -79,6 +79,20 @@ KNOWN = {
     "W4TN": ("read", "block scalar content at column 1 after a directive"),
     "JEF9/01": ("read", "a block scalar holding only a blank line"),
 
+    # White space that an escape produced is content and must survive the
+    # trimming that folding does to the white space that was written as
+    # white space. yamlc trims the produced bytes, so it loses both.
+    "DE56/00": ("event", "an escaped tab at the end of a folded line"),
+    "DE56/01": ("event", "an escaped tab at the end of a folded line"),
+    "DE56/02": ("event", "an escaped tab at the end of a folded line"),
+    "DE56/03": ("event", "an escaped tab at the end of a folded line"),
+    "NP9H": ("event", "an escaped space beside a tab across a folded line"),
+    "Q8AD": ("event", "an escaped space beside a tab across a folded line"),
+
+    # A block scalar whose last line is white space only.
+    "JEF9/02": ("event", "a block scalar holding one line of spaces, kept"),
+    "L24T/01": ("event", "a trailing line of spaces inside a block scalar"),
+
     # Documents yamlc reads and the suite marks invalid.
     "9C9N": ("refuse", "a flow sequence continued at a lesser indentation"),
     "9JBA": ("refuse", "a comment with no space after a flow sequence"),
@@ -225,8 +239,42 @@ def main(argv):
             failures[cid] = ("read", why)
     print("read %d" % read)
     print("refused %d" % refused)
+
+    # The event comparison. test.event is what a conformant parser must
+    # produce, in the shape events.go writes, so this is a byte
+    # comparison with no translation step in between. A case already
+    # counted above as read-or-refused is left alone: one case produces
+    # at most one entry, or KNOWN would need two spellings for one bug.
+    evsame = evdiffer = 0
+    for cid, path in ids:
+        if cid in invalid or cid in failures:
+            continue
+        with open(os.path.join(path, "test.event")) as f:
+            want = f.read().strip("\n")
+        r = subprocess.run([yamlc, "events", os.path.join(path, "in.yaml")],
+                           capture_output=True, text=True)
+        got = r.stdout.strip("\n")
+        if r.returncode == 0 and got == want:
+            evsame += 1
+            continue
+        evdiffer += 1
+        failures[cid] = ("event", firstdiff(want, got))
+    print("event-same %d" % evsame)
+    print("event-differ %d" % evdiffer)
+
     report(failures)
     return 0
+
+
+def firstdiff(want, got):
+    """The first line the two event streams disagree on."""
+    a, b = want.split("\n"), got.split("\n")
+    for i in range(max(len(a), len(b))):
+        x = a[i] if i < len(a) else "(end)"
+        y = b[i] if i < len(b) else "(end)"
+        if x != y:
+            return "line %d: want %s, got %s" % (i + 1, x, y)
+    return "same"
 
 
 def report(failures):

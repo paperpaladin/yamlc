@@ -1015,9 +1015,14 @@ tget() { sed -n "s/^$1 //p" "$TS"; }
 if [ -n "$(tget unavailable)" ]; then
 	echo "SKIP yaml test suite: $(tget unavailable)"
 else
-	echo "yaml test suite: $(tget cases) cases, $(tget read) read, $(tget refused) refused, $(tget known) known failures"
+	echo "yaml test suite: $(tget cases) cases, $(tget read) read, $(tget refused) refused, events $(tget event-same) same $(tget event-differ) differ, $(tget known) known failures"
 	eq "yts/digest"     "yes" "$(tget digest-match)"
 	eq "yts/cases"      "402" "$(tget cases)"
+	# A floor, not the exact figure, which moves every time a refusal
+	# is fixed and one more case reaches the event comparison. What
+	# this guards is the comparison running on a corpus at all.
+	eq "yts/event-enough" "yes" \
+		"$([ "$(tget event-same)" -gt 250 ] && echo yes || echo no)"
 	eq "yts/unexpected" "0"   "$(tget unexpected-count)"
 	eq "yts/fixed"      "0"   "$(tget fixed-count)"
 fi
