@@ -56,10 +56,6 @@ KNOWN = {
     "FH7J": ("read", "a tag on an empty key, read as a tag on the mapping"),
     "PW8X": ("read", "an anchor on an empty key, read as one on the mapping"),
 
-    # The : of a flow mapping entry may be on a later line than its key.
-    "4MUZ/02": ("read", "flow mapping colon on the line after a plain key"),
-    "VJP3/01": ("read", "flow mapping colon on its own line"),
-
     # A tab is separation whitespace, so it may precede a flow collection
     # at the top level, and may separate items inside one.
     "6CA3": ("read", "tab before a top level flow collection"),

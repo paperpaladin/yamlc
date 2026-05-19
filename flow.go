@@ -125,10 +125,14 @@ func (p *parser) flowSeqEntry(ind, oline, ocol int, closing byte) (*Node, error)
 	if err != nil {
 		return nil, err
 	}
-	// ns-s-implicit-yaml-key ends with s-separate-in-line?, so a plain
-	// key's colon has to be on the key's own line. A JSON-like key goes
-	// through c-ns-flow-map-json-key-entry, which allows s-separate and so
-	// allows a line break.
+	// A pair written inside a flow SEQUENCE goes through ns-flow-pair,
+	// whose implicit form is ns-s-implicit-yaml-key, and that ends with
+	// s-separate-in-line?, which does not cross a line break. So the
+	// colon has to be on the key's own line here, and "[ key\n : value ]"
+	// is a refusal. A pair inside a flow MAPPING is a different
+	// production and does allow the break; see flowMapEntry. A JSON-like
+	// key goes through c-ns-flow-map-json-key-entry, which allows
+	// s-separate either way.
 	if jsonLike {
 		if err := p.flowSkip(ind, oline, ocol, closing); err != nil {
 			return nil, err
@@ -168,12 +172,19 @@ func (p *parser) flowMapEntry(ind, oline, ocol int, closing byte) (Pair, error) 
 	if err != nil {
 		return Pair{}, err
 	}
-	if jsonLike {
-		if err := p.flowSkip(ind, oline, ocol, closing); err != nil {
-			return Pair{}, err
-		}
-	} else {
-		p.skipBlanks()
+	// ns-flow-map-yaml-key-entry is the key, then s-separate(n,c)? and
+	// then the value indicator. s-separate(n,c) in flow context is
+	// s-separate-lines, which allows a line break followed by
+	// s-flow-line-prefix(n), so the colon may sit on a later line than
+	// its key as long as that line is indented past the block level.
+	// VJP3 is the pair that pins it: the same document indented by one
+	// space is valid and at column zero is not.
+	kl := p.s.line
+	if err := p.flowSkip(ind, oline, ocol, closing); err != nil {
+		return Pair{}, err
+	}
+	if p.s.line != kl && p.s.col <= ind {
+		return Pair{}, p.s.errf("a flow mapping continued on a later line must be indented past column %d", ind+1)
 	}
 	if p.s.peek(0) == ':' && (jsonLike || spaceOrEnd(p.s.peek(1)) || isFlowEnd(p.s.peek(1))) {
 		if err := p.checkKeyLength(kpos, kline, kcol); err != nil {

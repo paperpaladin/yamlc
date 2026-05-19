@@ -525,6 +525,17 @@ ev_diff "flow-empty-key-ev"  '{: 1}\n'
 accept_only "flow-colon-nextline" '{"a"\n: 1}\n'
 ev_diff "flow-colon-nextline-ev"  '{"a"\n: 1}\n'
 
+# ns-flow-map-yaml-key-entry allows s-separate(n,c) there too, so a plain
+# key may have its colon on a later line, which PyYAML also refuses. The
+# break is allowed only onto a line indented past the block level, so the
+# same document at column zero is a refusal. A pair written inside a flow
+# SEQUENCE is ns-flow-pair, which ends in s-separate-in-line and does not
+# cross a break at all, so "[ key" newline " : value ]" stays refused.
+accept_only "flow-plain-colon-nextline" '{foo\n: bar}\n'
+accept_only "flow-plain-colon-indented" 'k: {\n k\n :\n v\n }\n'
+refuse "flow-plain-colon-column0" "3:1" 'k: {\nk\n:\nv\n}\n'
+refuse "flow-seq-pair-colon-nextline" "3:3" '---\n[ key\n  : value ]\n'
+
 # --- resolution (section 10.2.1.2 for 1.2, PyYAML's resolver for 1.1) --
 res "r-bools"      '[yes, no, on, off, true, false, True, FALSE, y, n]\n'
 res "r-nulls"      '[~, null, Null, NULL, ]\n'
