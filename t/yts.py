@@ -56,10 +56,7 @@ KNOWN = {
     "FH7J": ("read", "a tag on an empty key, read as a tag on the mapping"),
     "PW8X": ("read", "an anchor on an empty key, read as one on the mapping"),
 
-    # A tab is separation whitespace, so it may precede a flow collection
-    # at the top level, and may separate items inside one.
-    "6CA3": ("read", "tab before a top level flow collection"),
-    "Q5MG": ("read", "tab before a top level flow collection"),
+    # A tab is separation whitespace inside a flow collection too.
     "6HB6": ("read", "a comment inside a flow collection"),
 
     # A block scalar at indentation zero, which the content indentation

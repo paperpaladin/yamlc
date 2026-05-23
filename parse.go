@@ -138,8 +138,15 @@ func (p *parser) skipPrefix() error {
 				p.skipLine()
 				continue
 			}
+			// At the document level the required indentation is zero,
+			// so a tab here is s-separate-in-line and not indentation:
+			// s-l+flow-in-block(-1) is s-separate(0,flow-out) and then
+			// a flow node, which is why a tab may precede "[1]" or a
+			// scalar at column zero. A block collection needs s-indent,
+			// which is spaces, and the guard for that is in blockNode
+			// below; it is what refuses a tab before "- a".
 			p.reset(k)
-			return p.s.errf("tab cannot be used for indentation")
+			p.skipBlanks()
 		}
 		switch {
 		case p.s.peek(0) == '\n':

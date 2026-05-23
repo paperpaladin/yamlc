@@ -582,7 +582,19 @@ res_diff "r-merge-loose" '[<<, =]\n'
 
 refuse "dir-no-doc"    '2:1' '%YAML 1.2\nfoo\n'
 refuse "dir-bare-pct"  '1:1' '%\n--- foo\n'
-refuse "tab-indent"    '1:1' '\tfoo\n'
+# A tab at column zero in a bare document is s-separate-in-line, not
+# indentation: s-l+flow-in-block(-1) opens with s-separate(0,flow-out).
+# So a flow node or a scalar may follow one, and the YAML test suite says
+# so in 6CA3 and Q5MG. This used to be a refuse case asserting the
+# opposite, and it passed because PyYAML refuses the document as well.
+# PyYAML is not the authority for a 1.2 production, which is the whole
+# reason the test suite is now an oracle here.
+accept_only "tab-then-scalar" '\tfoo\n'
+accept_only "tab-then-flow-map" '\t{}\n'
+accept_only "tab-then-flow-seq" '\t[\n\t]\n'
+# A block collection still needs s-indent, which is spaces.
+refuse "tab-then-block-map" '1:5' '\tfoo: 1\n'
+refuse "tab-then-block-seq" '1:2' '\t- a\n'
 refuse "unknown-handle" '1:1' '!e!foo x\n'
 refuse "two-anchors"   '1:4' '&a &b x\n'
 refuse "two-tags"      '1:4' '!a !b x\n'
