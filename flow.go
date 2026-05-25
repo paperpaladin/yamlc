@@ -86,13 +86,11 @@ func (p *parser) parseFlow(n *Node, ind int) error {
 // because this function ate the character first.
 func (p *parser) flowSkip(ind, oline, ocol int, closing byte) error {
 	for {
-		blanks := p.s.col == 0
 		for isBlank(p.s.peek(0)) {
 			p.s.next()
-			blanks = true
 		}
 		switch {
-		case p.s.peek(0) == '#' && blanks:
+		case p.s.peek(0) == '#' && p.s.afterBlank():
 			p.skipLine()
 		case p.s.peek(0) == '\n':
 			p.s.next()

@@ -221,6 +221,21 @@ func (s *src) peek(n int) byte {
 
 func (s *src) eof() bool { return s.pos >= len(s.b) }
 
+// afterBlank reports whether the character before the cursor is a space
+// or a tab, or whether the cursor is at the start of a line. It is the
+// condition for "#" beginning a comment: c-comment is preceded by
+// s-separate-in-line, which is a break or at least one blank. A scanner
+// that counts the blanks it skipped itself gets this wrong when another
+// scanner ate them first, which is how a comment after a plain scalar
+// inside a flow collection came to be a refusal.
+func (s *src) afterBlank() bool {
+	if s.pos == 0 || s.col == 0 {
+		return true
+	}
+	c := s.b[s.pos-1]
+	return c == ' ' || c == '\t'
+}
+
 // next advances one character, keeping line and column in step. Columns
 // count characters, so a multi-byte character moves the column by one.
 func (s *src) next() {

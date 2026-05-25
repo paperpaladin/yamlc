@@ -531,6 +531,13 @@ ev_diff "flow-colon-nextline-ev"  '{"a"\n: 1}\n'
 # same document at column zero is a refusal. A pair written inside a flow
 # SEQUENCE is ns-flow-pair, which ends in s-separate-in-line and does not
 # cross a break at all, so "[ key" newline " : value ]" stays refused.
+# c-comment needs s-separate-in-line before it, which is a break or at
+# least one blank, and the blank may have been eaten by whatever scanned
+# the node before. A plain scalar inside a flow collection takes its own
+# trailing spaces, so the comment after it looked like content.
+ev "flow-comment-after-plain"  '[ b # c\n]\n'
+ev "flow-comment-after-plain2" 'a: [\n b # c\n ]\n'
+
 accept_only "flow-plain-colon-nextline" '{foo\n: bar}\n'
 accept_only "flow-plain-colon-indented" 'k: {\n k\n :\n v\n }\n'
 refuse "flow-plain-colon-column0" "3:1" 'k: {\nk\n:\nv\n}\n'
