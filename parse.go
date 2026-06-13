@@ -106,7 +106,7 @@ func (p *parser) skipLine() {
 // same line is not something to guess at.
 func (p *parser) endLine() error {
 	p.skipBlanks()
-	if p.s.peek(0) == '#' {
+	if p.s.peek(0) == '#' && p.s.afterBlank() {
 		p.skipLine()
 		return nil
 	}
@@ -120,9 +120,13 @@ func (p *parser) endLine() error {
 	return p.s.errf("unexpected %q after a node", p.s.rest())
 }
 
-// atLineEnd reports whether only a comment or the break is left.
+// atLineEnd reports whether only a comment or the break is left. A "#"
+// counts only where a comment may begin, which is after a break or after
+// at least one blank: c-comment is preceded by s-separate-in-line. So
+// key: "value"# c is not a comment and not a valid document.
 func (p *parser) atLineEnd() bool {
-	return p.s.eof() || p.s.peek(0) == '\n' || p.s.peek(0) == '#'
+	return p.s.eof() || p.s.peek(0) == '\n' ||
+		(p.s.peek(0) == '#' && p.s.afterBlank())
 }
 
 // skipPrefix consumes blank lines and comment lines, leaving the cursor at

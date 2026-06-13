@@ -538,6 +538,16 @@ ev_diff "flow-colon-nextline-ev"  '{"a"\n: 1}\n'
 ev "flow-comment-after-plain"  '[ b # c\n]\n'
 ev "flow-comment-after-plain2" 'a: [\n b # c\n ]\n'
 
+# The same rule read the other way: a "#" with no blank in front of it is
+# not a comment anywhere, so these four are refusals and yamlc read all
+# four of them. Test suite cases SU5Z, X4QW, 9JBA and MUS6.
+# PyYAML reads the first two, so those are refuse_only and the authority
+# for them is the test suite rather than PyYAML.
+refuse_only "hash-after-quoted"   '1:13' 'key: "value"# invalid comment\n'
+refuse_only "hash-after-flow-seq" '2:13' '---\n[ a, b, c, ]#invalid\n'
+refuse "hash-after-blockhdr" '1:9'  'block: ># comment\n  scalar\n'
+refuse "hash-after-version"  '1:1'  '%YAML 1.1#...\n---\n'
+
 accept_only "flow-plain-colon-nextline" '{foo\n: bar}\n'
 accept_only "flow-plain-colon-indented" 'k: {\n k\n :\n v\n }\n'
 refuse "flow-plain-colon-column0" "3:1" 'k: {\nk\n:\nv\n}\n'
