@@ -386,6 +386,18 @@ ev "lit-strip"       '--- |-\n  x\n\n'
 ev "lit-keep"        '--- |+\n  x\n\n'
 ev "lit-clip"        '--- |\n  x\n\n\n'
 ev "lit-explicit-2"  '--- |2\n  x\n'
+# A block scalar that IS the document root has n = -1, so with the
+# indentation auto-detected the content may sit at column 1. Test suite
+# FP8R, DK3J (whose content holds a line that looks like a comment), M7A3
+# and W4TN. PyYAML refuses all four.
+accept_only "lit-root-col0"  '--- >\nline1\nline2\n'
+accept_only "lit-root-hash"  '--- >\nline1\n# no comment\nline3\n'
+eq "lit-root-col0/value" "str line1 line2\\n" \
+	"$($Y dump "$(doc litroot '--- >\nline1\nline2\n')")"
+# A --- or ... at column zero ends the document rather than being
+# content, which only comes up once the content indentation can be zero.
+eq "lit-root-ends" "str %!PS-Adobe-2.0\\n;null" \
+	"$($Y dump "$(doc litroot2 '--- |\n%!PS-Adobe-2.0\n...\n---\n')" | tr '\n' ';' | sed 's/;$//')"
 ev "lit-explicit-4"  '--- |4\n      x\n'
 ev "lit-ind-then-ch" '--- |2-\n  x\n'
 ev "lit-ch-then-ind" '--- |-2\n  x\n'

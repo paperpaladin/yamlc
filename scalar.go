@@ -278,12 +278,26 @@ func (p *parser) scanBlockScalar(ind int, style Style) (string, int8, bool, erro
 		return "", 0, false, err
 	}
 
-	// Section 8.1.1.1: the indentation indicator is relative to the parent
-	// node, and a node at the top of a document has none, so the floor is
-	// one space.
+	// Section 8.1.1.1: the indentation indicator is relative to the
+	// parent node, and a block scalar that IS the document root has
+	// n = -1. So with the indentation auto-detected its content may
+	// begin at column zero, which is the suite's FP8R: "--- >" and then
+	// line1 at column 1 of the next line.
+	//
+	// With an explicit indicator the same reading would make "--- |2"
+	// mean content at column 2 rather than column 3, and nothing
+	// settles that: the suite's four cases for a root-level indicator
+	// (2G84) have no content at all, two of them being refusals for a
+	// zero and a two-digit indicator. PyYAML says column 3, yamlc has
+	// said column 3 since it was written, and the floor of one below is
+	// what keeps it there. Written down rather than quietly chosen.
 	minIndent := ind + 1
-	if minIndent < 1 {
-		minIndent = 1
+	floor := 0
+	if incr != 0 {
+		floor = 1
+	}
+	if minIndent < floor {
+		minIndent = floor
 	}
 	var out []byte
 	var breaks []byte
@@ -309,7 +323,10 @@ func (p *parser) scanBlockScalar(ind int, style Style) (string, int8, bool, erro
 	}
 
 	lineBreak := ""
-	for p.s.col == indent && !p.s.eof() {
+	// A content line at column zero that is --- or ... ends the document
+	// rather than being content, which only arises once the indentation
+	// can be zero at all.
+	for p.s.col == indent && !p.s.eof() && !(p.s.col == 0 && p.atAnyMarker()) {
 		out = append(out, breaks...)
 		leadingText := !isBlank(p.s.peek(0))
 		for !p.s.eof() && p.s.peek(0) != '\n' {
@@ -324,7 +341,7 @@ func (p *parser) scanBlockScalar(ind int, style Style) (string, int8, bool, erro
 			lineBreak = ""
 		}
 		breaks, lineStart = p.blockBreaks(indent)
-		if p.s.col != indent || p.s.eof() {
+		if p.s.col != indent || p.s.eof() || (p.s.col == 0 && p.atAnyMarker()) {
 			break
 		}
 		if folded && lineBreak == "\n" && leadingText && !isBlank(p.s.peek(0)) {

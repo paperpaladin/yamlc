@@ -56,12 +56,6 @@ KNOWN = {
     "FH7J": ("read", "a tag on an empty key, read as a tag on the mapping"),
     "PW8X": ("read", "an anchor on an empty key, read as one on the mapping"),
 
-    # A block scalar at indentation zero, which the content indentation
-    # rules allow after --- .
-    "DK3J": ("read", "block scalar content at column 1"),
-    "FP8R": ("read", "block scalar content at column 1"),
-    "M7A3": ("read", "block scalar content at column 1, then a bare document"),
-    "W4TN": ("read", "block scalar content at column 1 after a directive"),
     "JEF9/01": ("read", "a block scalar holding only a blank line"),
 
     # White space that an escape produced is content and must survive the
