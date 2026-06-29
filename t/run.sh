@@ -547,6 +547,15 @@ ev_diff "flow-colon-nextline-ev"  '{"a"\n: 1}\n'
 # least one blank, and the blank may have been eaten by whatever scanned
 # the node before. A plain scalar inside a flow collection takes its own
 # trailing spaces, so the comment after it looked like content.
+# A tab an escape produced is ns-double-char, which is content, and the
+# trimming that s-flow-folded does applies to the s-white somebody wrote
+# before the break. Both look the same once they are bytes in a buffer,
+# which is how yamlc lost the tab in DE56. And the white space before an
+# escaped break is kept, which is the specification's own example 7.5,
+# the suite's NP9H and Q8AD, and what PyYAML does.
+ev "dq-escaped-tab-fold"  '"1 trailing\\t\n    tab"\n'
+ev "dq-space-before-esc"  '"a \\\n  b"\n'
+
 ev "flow-comment-after-plain"  '[ b # c\n]\n'
 ev "flow-comment-after-plain2" 'a: [\n b # c\n ]\n'
 

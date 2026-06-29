@@ -58,9 +58,18 @@ func (p *parser) scanSingle(ind int) (string, bool, error) {
 	}
 }
 
-func trimRightBlanks(b []byte) []byte {
+func trimRightBlanks(b []byte) []byte { return trimBlanksTo(b, 0) }
+
+// trimBlanksTo trims trailing blanks but never below keep. A double-quoted
+// scalar needs that: s-flow-folded drops the s-white written before a line
+// break, and a tab an escape produced is ns-double-char, which is content
+// and looks exactly the same once it is in the buffer. "1 trailing\t"
+// folded onto "    tab" is "1 trailing<TAB> tab" and yamlc made it
+// "1 trailing tab", which is the suite's DE56 and which PyYAML also gets
+// right.
+func trimBlanksTo(b []byte, keep int) []byte {
 	n := len(b)
-	for n > 0 && isBlank(b[n-1]) {
+	for n > keep && isBlank(b[n-1]) {
 		n--
 	}
 	return b[:n]
@@ -75,6 +84,9 @@ func (p *parser) scanDouble(ind int) (string, bool, error) {
 	p.s.next()
 	var out []byte
 	multi := false
+	// Everything before keep was written by an escape, so it is content
+	// and the folding rules must not trim it away.
+	keep := 0
 	for {
 		c := p.s.peek(0)
 		switch {
@@ -85,10 +97,11 @@ func (p *parser) scanDouble(ind int) (string, bool, error) {
 			return string(out), multi, nil
 		case c == '\\':
 			if p.s.peek(1) == '\n' {
-				// s-double-escaped: the whitespace before the backslash
-				// and the break itself are both dropped, and any blank
-				// line after it still counts as a line feed.
-				out = trimRightBlanks(out)
+				// s-double-escaped: the break itself is dropped, and any
+				// blank line after it still counts as a line feed. The
+				// white space written before the backslash is kept, which
+				// is what the suite's NP9H and Q8AD say, and PyYAML with
+				// them; the spec's own example 7.5 is the document.
 				p.s.next()
 				breaks, ind2, ok, err := p.foldBreaks(ind)
 				if err != nil {
@@ -106,8 +119,9 @@ func (p *parser) scanDouble(ind int) (string, bool, error) {
 				return "", false, err
 			}
 			out = append(out, b...)
+			keep = len(out)
 		case c == '\n':
-			out = trimRightBlanks(out)
+			out = trimBlanksTo(out, keep)
 			breaks, ind2, ok, err := p.foldBreaks(ind)
 			if err != nil {
 				return "", false, err
