@@ -307,6 +307,14 @@ class Gen:
         out = []
         for i in range(n):
             d = self.document()
+            if i > 0 and d.startswith("%") and not out[-1].endswith("...\n"):
+                # l-directive-document is directives and then an explicit
+                # document, and directives may only follow a document
+                # suffix. "---" closes the previous document but is not
+                # one, so a generator that writes a directive straight
+                # after an unterminated document writes an invalid
+                # stream. It did, and the parser used to read it.
+                out[-1] += "...\n"
             if i > 0 and not d.startswith(("---", "%")):
                 d = "---\n" + d
             out.append(d)

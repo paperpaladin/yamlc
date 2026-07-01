@@ -59,9 +59,6 @@ KNOWN = {
 
     # Documents yamlc reads and the suite marks invalid.
     "9C9N": ("refuse", "a flow sequence continued at a lesser indentation"),
-    "9HCY": ("refuse", "a directive with no document end marker before it"),
-    "EB22": ("refuse", "a directive with no document end marker before it"),
-    "RHX7": ("refuse", "a directive with no document end marker before it"),
     "9KBC": ("refuse", "a block mapping beginning on the --- line"),
     "CXX2": ("refuse", "an anchor on the --- line, then a block mapping"),
     "C2SP": ("refuse", "a flow mapping key spread over two lines"),

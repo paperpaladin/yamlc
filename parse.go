@@ -272,6 +272,15 @@ func parseStream(name string, in []byte, maxDepth int) ([]*Document, error) {
 		d := &Document{Line: p.s.line}
 		p.resetDirectives()
 		if p.s.peek(0) == '%' {
+			// l-directive-document is l-directive+ then an explicit
+			// document, and directives may only follow a document
+			// suffix. A "---" ends the previous document but is not a
+			// suffix, so a directive after an unterminated document is
+			// a refusal: the suite's 9HCY, EB22 and RHX7, all of which
+			// yamlc read.
+			if needMarker {
+				return nil, p.s.errf("a directive needs ... to close the document before it")
+			}
 			if err := p.directives(); err != nil {
 				return nil, err
 			}

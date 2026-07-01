@@ -635,6 +635,14 @@ refuse_res "r-bad-date" '2001-13-99\n'
 res_diff "r-merge-loose" '[<<, =]\n'
 
 refuse "dir-no-doc"    '2:1' '%YAML 1.2\nfoo\n'
+# l-directive-document is directives and then an explicit document, and
+# directives may only follow a document suffix. "---" ends the document
+# before it but is not a suffix, so a directive after an unterminated
+# document is a refusal. Suite cases 9HCY, EB22 and RHX7, all three of
+# which yamlc read. "..." before the directive makes all three legal.
+refuse_only "dir-after-doc"  '3:1' '---\nkey: value\n%YAML 1.2\n---\n'
+refuse_only "dir-after-bare" '2:1' '!foo "bar"\n%TAG ! tag:example.com,2000:app/\n---\n!foo "bar"\n'
+accept "dir-after-suffix"  '---\nkey: value\n...\n%YAML 1.2\n---\nk2: v2\n'
 refuse "dir-bare-pct"  '1:1' '%\n--- foo\n'
 # A tab at column zero in a bare document is s-separate-in-line, not
 # indentation: s-l+flow-in-block(-1) opens with s-separate(0,flow-out).
@@ -997,7 +1005,13 @@ python3 t/yamlcmp.py $Y t/corpus/yaml --sample 200 > "$YC" || exit 2
 yget() { sed -n "s/^$1 //p" "$YC"; }
 echo "yaml corpus: $(yget files) files, events $(yget ev-same) same $(yget ev-differ) differ, values $(yget val-same) same $(yget val-differ) differ $(yget val-refused) refused"
 eq "yamlcorpus/ev-differ"     "0" "$(yget ev-differ)"
-eq "yamlcorpus/ev-refused"    "0" "$(yget ev-refused)"
+# A refusal has to be on one of the machine's own YAML files, never on a
+# generated one, and the cause has to be in the README. There is one:
+# the specification preview example shipped with python3-yaml puts a
+# %TAG after a document that has no ... to close it, which YAML 1.2
+# does not allow and the test suite marks as an error in 9HCY.
+eq "yamlcorpus/ev-refused-native-only" "" \
+	"$(sed -n 's/^ev-refused //p' "$YC" | grep -v '^native-' | grep -v '^[0-9]*$' | tr '\n' ' ')"
 eq "yamlcorpus/origin-differ" "0" "$(yget origin-differ)"
 eq "yamlcorpus/enough"        "yes" "$([ "$(yget ev-same)" -gt 600 ] && echo yes || echo no)"
 
