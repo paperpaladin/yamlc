@@ -327,7 +327,11 @@ func (p *parser) scanBlockScalar(ind int, style Style) (string, int8, bool, erro
 		}
 		// Section 8.1.1.1: "it is an error for any of the leading empty
 		// lines to contain more spaces than the first non-empty line".
-		if maxEmpty > indent {
+		// There has to BE a first non-empty line for that to mean
+		// anything, and "- |+" followed by one line of spaces has none:
+		// the suite's JEF9/01, which yamlc refused.
+		hasContent := !p.s.eof() && content > ind
+		if hasContent && maxEmpty > indent {
 			p.reset(deepest)
 			return "", 0, false, p.s.errf("a leading empty line of this block scalar is indented more than its first content line")
 		}
@@ -351,6 +355,12 @@ func (p *parser) scanBlockScalar(ind int, style Style) (string, int8, bool, erro
 		if p.s.peek(0) == '\n' {
 			lineBreak = "\n"
 			p.s.next()
+		} else if p.s.eof() {
+			// The stream ends with a line break whether or not one is
+			// written, so the last content line has one: the suite's
+			// L24T/01 against L24T/00, the same document with and
+			// without the final newline.
+			lineBreak = "\n"
 		} else {
 			lineBreak = ""
 		}
@@ -418,6 +428,18 @@ func (p *parser) blockIndentation() (breaks []byte, content, maxEmpty int, lineS
 	for {
 		here := p.mark()
 		n := p.skipSpaces()
+		// A last line of spaces with no break after it is still an empty
+		// line: the stream ends with a break whether or not one is
+		// written. Without this the spaces read as a content line and
+		// the block scalar came out empty, which is the suite's JEF9/02.
+		if n > 0 && p.s.eof() {
+			if n > maxEmpty {
+				maxEmpty = n
+				deepest = here
+			}
+			breaks = append(breaks, '\n')
+			return breaks, 0, maxEmpty, p.mark(), deepest
+		}
 		if p.s.peek(0) == '\n' {
 			if n > maxEmpty {
 				maxEmpty = n

@@ -56,11 +56,6 @@ KNOWN = {
     "FH7J": ("read", "a tag on an empty key, read as a tag on the mapping"),
     "PW8X": ("read", "an anchor on an empty key, read as one on the mapping"),
 
-    "JEF9/01": ("read", "a block scalar holding only a blank line"),
-
-    # A block scalar whose last line is white space only.
-    "JEF9/02": ("event", "a block scalar holding one line of spaces, kept"),
-    "L24T/01": ("event", "a trailing line of spaces inside a block scalar"),
 
     # Documents yamlc reads and the suite marks invalid.
     "9C9N": ("refuse", "a flow sequence continued at a lesser indentation"),

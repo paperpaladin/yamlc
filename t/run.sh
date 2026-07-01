@@ -554,6 +554,22 @@ ev_diff "flow-colon-nextline-ev"  '{"a"\n: 1}\n'
 # escaped break is kept, which is the specification's own example 7.5,
 # the suite's NP9H and Q8AD, and what PyYAML does.
 ev "dq-escaped-tab-fold"  '"1 trailing\\t\n    tab"\n'
+
+# The stream ends with a line break whether or not one is written, so a
+# block scalar's last line has one either way. The suite pairs these:
+# L24T/00 and /01 are one document with and without the final newline,
+# and JEF9/00 to /02 are the same for keep chomping. The "- |+" with one
+# line of spaces and nothing else was a refusal, because the rule about
+# leading empty lines being less indented than the first content line
+# was applied to a scalar that has no content line.
+ev "blk-trailing-spaces-nl"   'foo: |\n  x\n   \n'
+# PyYAML does not supply that break when the file has no trailing
+# newline, so the pair with the break is an agreement and the pair
+# without it is a divergence. The test suite has both spellings of each
+# document and gives them the same expected output.
+ev_diff "blk-trailing-spaces-eof"  'foo: |\n  x\n   '
+ev "blk-keep-spaces-only-nl"  '- |+\n      \n'
+ev_diff "blk-keep-spaces-only-eof" '- |+\n      '
 ev "dq-space-before-esc"  '"a \\\n  b"\n'
 
 ev "flow-comment-after-plain"  '[ b # c\n]\n'
