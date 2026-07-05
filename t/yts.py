@@ -45,16 +45,7 @@ CHUNK = 200
 # refuses, and "refuse" for an invalid one it reads. The cause is what
 # the parser does wrong, in a few words; the README groups them.
 KNOWN = {
-    # A node property written on one line, with the node it belongs to on
-    # the next, where that node is a block mapping whose own first key
-    # carries a property too. yamlc gives both properties to one node.
     "26DV": ("read", "anchor on a block mapping, alias as its first key"),
-    "6BFJ": ("read", "anchor on a block mapping and on its first key"),
-    "7BMT": ("read", "anchor on a block mapping and on its first key"),
-    "9KAX": ("read", "anchor and tag on separate lines before a node"),
-    "U3XV": ("read", "anchor on a block mapping and on its first key"),
-    "FH7J": ("read", "a tag on an empty key, read as a tag on the mapping"),
-    "PW8X": ("read", "an anchor on an empty key, read as one on the mapping"),
 
 
     # Documents yamlc reads and the suite marks invalid.

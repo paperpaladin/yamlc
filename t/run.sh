@@ -659,6 +659,24 @@ refuse "tab-then-block-map" '1:5' '\tfoo: 1\n'
 refuse "tab-then-block-seq" '1:2' '\t- a\n'
 refuse "unknown-handle" '1:1' '!e!foo x\n'
 refuse "two-anchors"   '1:4' '&a &b x\n'
+# Two groups of properties on two lines are legal when the node turns
+# out to be a block mapping, because the group on the key's own line is
+# the key's and the one above it is the mapping's. Suite cases 6BFJ,
+# 7BMT, 9KAX and U3XV; PyYAML refuses all four with "found duplicate
+# anchor" or by giving both to one node.
+# ev rather than accept, because which node each group lands on is the
+# whole point and PyYAML splits them the same way.
+ev "two-groups-map"  'top: &node\n  &key k: v\n'
+ev "two-groups-tag"  '---\n!!map\n&a8 !!str key8: value7\n'
+# ... and still a refusal when the node is not a mapping, or when a
+# third group turns up.
+refuse "two-groups-scalar" '1:2' '&a\n&b\nx\n'
+refuse_only "three-groups" '3:1' '&a\n!!str\n&b k: v\n'
+
+# A tag or an anchor on the colon's own line belongs to the empty key,
+# not to the mapping. Suite cases FH7J and PW8X.
+ev "prop-on-empty-key"  '!!null : a\n'
+ev "prop-on-empty-key2" '- &a : a\n'
 refuse "two-tags"      '1:4' '!a !b x\n'
 refuse "anchor-noname" '1:2' '& x\n'
 refuse "verbatim-open" '1:8' '!<tag:x y\n'

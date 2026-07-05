@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"unicode/utf8"
 )
@@ -480,9 +481,37 @@ func (p *parser) parseBlockNode(c blockCtx) (*Node, error) {
 		return p.empty(), nil
 	}
 	line, col := p.s.line, p.s.col
-	var pr props
+	// Two groups, because a block mapping and its first key may each
+	// carry an anchor and a tag, and the two sets arrive here one after
+	// the other with nothing between them but a line break:
+	//
+	//	top: &node
+	//	  &key k: v
+	//
+	// pr is the group on the most recent property line and outer is
+	// everything before it. A second anchor on the SAME line is still a
+	// refusal, and so is a second group when the node turns out not to
+	// be a mapping, which is how "&a" newline "&b" newline "x" stays
+	// refused.
+	var pr, outer props
+	// Properties are grouped by the line they sit on, and there can be
+	// two groups at most: one for the node and one for the first key of
+	// a block mapping it may turn out to be.
+	newGroup := func(pline int) error {
+		if pr.empty() || pr.line() == pline {
+			return nil
+		}
+		if !outer.empty() {
+			return p.s.errf("a node and its first key carry one set of properties each, and this is a third")
+		}
+		outer, pr = pr, props{}
+		return nil
+	}
 	for p.s.peek(0) == '&' || p.s.peek(0) == '!' {
 		pline, pcol := p.s.line, p.s.col
+		if err := newGroup(pline); err != nil {
+			return nil, err
+		}
 		if p.s.peek(0) == '&' {
 			if pr.anchor != "" {
 				return nil, p.s.errf("a node can carry only one anchor")
@@ -508,8 +537,12 @@ func (p *parser) parseBlockNode(c blockCtx) (*Node, error) {
 			return nil, err
 		}
 		if !found {
+			all, err := outer.merge(pr)
+			if err != nil {
+				return nil, p.s.errAt(line, col+1, "%s", err.Error())
+			}
 			n := p.empty()
-			n.Anchor, n.Tag, n.TagRaw = pr.anchor, pr.tag, pr.tagRaw
+			n.Anchor, n.Tag, n.TagRaw = all.anchor, all.tag, all.tagRaw
 			n.Line, n.Col = line, col+1
 			return n, nil
 		}
@@ -518,7 +551,7 @@ func (p *parser) parseBlockNode(c blockCtx) (*Node, error) {
 	// that may be about to appear is decided by the line they are on. See
 	// the note on props.
 	c.afterProps = pr.onLine(p.s.line)
-	n, err := p.blockContent(c, pr, line, col)
+	n, err := p.blockContent(c, outer, pr, line, col)
 	if err != nil {
 		return nil, err
 	}
@@ -540,6 +573,11 @@ func (p *parser) parseBlockNode(c blockCtx) (*Node, error) {
 // mapping at the tag's column, and refused the last two lines. PyYAML
 // splits them the same way, because its scanner records a possible simple
 // key at the anchor token.
+var (
+	errTwoAnchors = errors.New("a node can carry only one anchor")
+	errTwoTags    = errors.New("a node can carry only one tag")
+)
+
 type props struct {
 	anchor                string
 	tag, tagRaw           string
@@ -552,39 +590,82 @@ func (pr props) onLine(line int) bool {
 		(pr.tagRaw != "" && pr.tagLine == line)
 }
 
-// split divides the properties between a mapping and its first key by the
-// line each one sits on, and gives the column the mapping starts at.
-func (pr props) split(line, here int) (keyP, mapP props, ind int) {
-	ind = here
+func (pr props) empty() bool { return pr.anchor == "" && pr.tagRaw == "" }
+
+// line is the line the group sits on. Every property in one group is on
+// the same line, which is what makes a group a group.
+func (pr props) line() int {
 	if pr.anchor != "" {
-		if pr.anchorLine == line {
-			keyP.anchor, keyP.anchorLine, keyP.anchorCol = pr.anchor, pr.anchorLine, pr.anchorCol
-			if pr.anchorCol < ind {
-				ind = pr.anchorCol
-			}
-		} else {
-			mapP.anchor = pr.anchor
-		}
+		return pr.anchorLine
 	}
-	if pr.tagRaw != "" {
-		if pr.tagLine == line {
-			keyP.tag, keyP.tagRaw = pr.tag, pr.tagRaw
-			if pr.tagCol < ind {
-				ind = pr.tagCol
-			}
-		} else {
-			mapP.tag, mapP.tagRaw = pr.tag, pr.tagRaw
-		}
+	return pr.tagLine
+}
+
+// merge puts two groups on one node, which is legal only when they do
+// not both carry the same kind of property.
+func (pr props) merge(o props) (props, error) {
+	if pr.empty() {
+		return o, nil
 	}
+	if o.empty() {
+		return pr, nil
+	}
+	if pr.anchor != "" && o.anchor != "" {
+		return props{}, errTwoAnchors
+	}
+	if pr.tagRaw != "" && o.tagRaw != "" {
+		return props{}, errTwoTags
+	}
+	if o.anchor != "" {
+		pr.anchor, pr.anchorLine, pr.anchorCol = o.anchor, o.anchorLine, o.anchorCol
+	}
+	if o.tagRaw != "" {
+		pr.tag, pr.tagRaw, pr.tagLine, pr.tagCol = o.tag, o.tagRaw, o.tagLine, o.tagCol
+	}
+	return pr, nil
+}
+
+// split divides the properties between a mapping and its first key by the
+// line each group sits on, and gives the column the mapping starts at.
+// The group on the key's own line is the key's, because an implicit key
+// is an ns-flow-yaml-node and may carry properties; anything from an
+// earlier line went through s-l+block-collection and is the mapping's.
+func (pr props) split(outer props, line, here int) (keyP, mapP props, ind int) {
+	ind = here
+	if !pr.empty() && pr.line() == line {
+		keyP = pr
+		if pr.anchor != "" && pr.anchorCol < ind {
+			ind = pr.anchorCol
+		}
+		if pr.tagRaw != "" && pr.tagCol < ind {
+			ind = pr.tagCol
+		}
+		return keyP, outer, ind
+	}
+	// Both groups are the mapping's, which merge already refused if they
+	// collide; blockContent checks that before it gets here.
+	mapP, _ = outer.merge(pr)
 	return keyP, mapP, ind
 }
 
-func (p *parser) blockContent(c blockCtx, pr props, line, col int) (*Node, error) {
+func (p *parser) blockContent(c blockCtx, outer, pr props, line, col int) (*Node, error) {
 	ch := p.s.peek(0)
 	here := p.s.col
 	startPos := p.s.pos
-	n := &Node{Kind: KScalar, Anchor: pr.anchor, Tag: pr.tag, TagRaw: pr.tagRaw,
+	all, _ := outer.merge(pr)
+	n := &Node{Kind: KScalar, Anchor: all.anchor, Tag: all.tag, TagRaw: all.tagRaw,
 		Line: line, Col: col + 1}
+	// outer is only ever non-empty because a property collided with one
+	// already read, and the only document shape where that is legal is a
+	// block mapping whose first key carries the second group. Every
+	// other branch below has to refuse it, or "&a" newline "&b" newline
+	// "x" would quietly anchor x twice.
+	badOuter := func() error {
+		if _, err := outer.merge(pr); err != nil {
+			return p.s.errAt(line, col+1, "%s", err.Error())
+		}
+		return nil
+	}
 	// A block collection after inline properties is not a production:
 	// s-l+block-collection puts s-l-comments between the properties and the
 	// collection, so the indicator has to be on a later line.
@@ -603,6 +684,9 @@ func (p *parser) blockContent(c blockCtx, pr props, line, col int) (*Node, error
 	// it is a ns-flow-yaml-node and may carry properties, so "&a b: c" is
 	// fine while "&a - b" is not.
 	indicatorOK := func(what string) error {
+		if err := badOuter(); err != nil {
+			return err
+		}
 		if err := blockOK(what); err != nil {
 			return err
 		}
@@ -623,11 +707,25 @@ func (p *parser) blockContent(c blockCtx, pr props, line, col int) (*Node, error
 		}
 		return p.parseBlockMap(here, nil, n)
 	case ch == ':' && spaceOrEnd(p.s.peek(1)):
-		if err := indicatorOK("block mapping"); err != nil {
+		// The key is e-node, and an anchor or tag on the colon's own
+		// line belongs to THAT empty key rather than to the mapping:
+		// "!!null : a" tags the null key. So this is blockOK and not
+		// indicatorOK, and the mapping begins at the property's column.
+		// Suite cases FH7J and PW8X.
+		if err := blockOK("block mapping"); err != nil {
 			return nil, err
 		}
-		return p.parseBlockMap(here, p.empty(), n)
+		keyP, mapP, mapInd := pr.split(outer, p.s.line, here)
+		k := p.empty()
+		k.Anchor, k.Tag, k.TagRaw = keyP.anchor, keyP.tag, keyP.tagRaw
+		k.Line, k.Col = line, col+1
+		m := &Node{Kind: KMap, Anchor: mapP.anchor, Tag: mapP.tag, TagRaw: mapP.tagRaw,
+			Line: line, Col: mapInd + 1}
+		return p.parseBlockMap(mapInd, k, m)
 	case ch == '|' || ch == '>':
+		if err := badOuter(); err != nil {
+			return nil, err
+		}
 		if ch == '|' {
 			n.Style = StLiteral
 		} else {
@@ -666,11 +764,14 @@ func (p *parser) blockContent(c blockCtx, pr props, line, col int) (*Node, error
 		// properties. One on an earlier line went through
 		// s-l+block-collection and belongs to the mapping: "a: &x" then
 		// "  b: 1" anchors the inner mapping, not the key "b".
-		keyP, mapP, mapInd := pr.split(p.s.line, here)
+		keyP, mapP, mapInd := pr.split(outer, p.s.line, here)
 		n.Anchor, n.Tag, n.TagRaw = keyP.anchor, keyP.tag, keyP.tagRaw
 		m := &Node{Kind: KMap, Anchor: mapP.anchor, Tag: mapP.tag, TagRaw: mapP.tagRaw,
 			Line: line, Col: mapInd + 1}
 		return p.parseBlockMap(mapInd, n, m)
+	}
+	if err := badOuter(); err != nil {
+		return nil, err
 	}
 	if n.Kind == KAlias && (pr.anchor != "" || pr.tagRaw != "") {
 		return nil, p.s.errAt(line, col, "an alias cannot carry an anchor or a tag")
