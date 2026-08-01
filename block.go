@@ -177,6 +177,9 @@ func (p *parser) parseKeyNode(ind int) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	if n.Kind == KAlias && (n.Anchor != "" || n.TagRaw != "") {
+		return nil, p.s.errAt(line, col, "an alias cannot carry an anchor or a tag")
+	}
 	if multi {
 		return nil, p.s.errAt(line, col, "a mapping key written like this must be on one line")
 	}
@@ -196,9 +199,10 @@ func (p *parser) inlineNode(n *Node, ind int) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		if n.Anchor != "" || n.TagRaw != "" {
-			return false, p.s.errf("an alias cannot carry an anchor or a tag")
-		}
+		// Whether the properties already on n are the alias's is not
+		// knowable here: in block context they may belong to a mapping
+		// this alias is about to become the first key of. Each caller
+		// checks once it knows.
 		n.Kind, n.Alias = KAlias, a
 		return false, nil
 	case ch == '\'':

@@ -45,8 +45,6 @@ CHUNK = 200
 # refuses, and "refuse" for an invalid one it reads. The cause is what
 # the parser does wrong, in a few words; the README groups them.
 KNOWN = {
-    "26DV": ("read", "anchor on a block mapping, alias as its first key"),
-
 
     # Documents yamlc reads and the suite marks invalid.
     "9C9N": ("refuse", "a flow sequence continued at a lesser indentation"),

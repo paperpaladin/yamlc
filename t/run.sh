@@ -677,6 +677,13 @@ refuse_only "three-groups" '3:1' '&a\n!!str\n&b k: v\n'
 # not to the mapping. Suite cases FH7J and PW8X.
 ev "prop-on-empty-key"  '!!null : a\n'
 ev "prop-on-empty-key2" '- &a : a\n'
+# An anchor on a block mapping whose first key is an alias. Which node
+# the anchor belongs to is not knowable while the alias is being read,
+# so the check that an alias carries no properties had to move out to
+# the two callers, which each know. Suite case 26DV.
+ev "anchor-map-alias-key" 'a: &x 1\ntop: &node\n  *x : scalar\n'
+refuse "alias-with-anchor" '1:1' '&a *x\n'
+refuse "alias-with-tag"    '2:3' 'k:\n  !!str *x\n'
 refuse "two-tags"      '1:4' '!a !b x\n'
 refuse "anchor-noname" '1:2' '& x\n'
 refuse "verbatim-open" '1:8' '!<tag:x y\n'

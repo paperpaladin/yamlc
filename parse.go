@@ -773,7 +773,7 @@ func (p *parser) blockContent(c blockCtx, outer, pr props, line, col int) (*Node
 	if err := badOuter(); err != nil {
 		return nil, err
 	}
-	if n.Kind == KAlias && (pr.anchor != "" || pr.tagRaw != "") {
+	if n.Kind == KAlias && (all.anchor != "" || all.tagRaw != "") {
 		return nil, p.s.errAt(line, col, "an alias cannot carry an anchor or a tag")
 	}
 	if err := p.endLine(); err != nil {
