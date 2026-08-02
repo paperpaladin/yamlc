@@ -1125,6 +1125,20 @@ for f in laughs-small.yaml anchor-huge.yaml long-line.yaml \
 	eq "hostile/read/$f" "ok" "$(hfile $f)"
 done
 
+# --- the mutation list still points at code that exists ----------------
+#
+# make mutants is a separate target because it takes half an hour, but a
+# mutant whose pattern no longer matches is reported as PATTERN there and
+# is neither killed nor a survivor, so it can go dead between runs and
+# say nothing. Five of them had. Checking the patterns costs nothing and
+# belongs in every run.
+MU=$W/o/mutants.out
+python3 t/mutants.py --check > "$MU" 2>&1
+mget() { sed -n "s/^$1 //p" "$MU"; }
+eq "mutants/stale" "0" "$(mget stale)"
+eq "mutants/enough" "yes" "$([ "$(mget mutants)" -ge 73 ] && echo yes || echo no)"
+grep '^stale ' "$MU" | grep -v '^stale [0-9]*$' || true
+
 # --- the YAML test suite ----------------------------------------------
 #
 # The YAML project's own conformance data, 402 cases, fetched once and

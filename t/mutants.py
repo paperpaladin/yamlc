@@ -2,6 +2,7 @@
 """Mutate the parser one edit at a time and require the suite to go red.
 
   python3 t/mutants.py [GROUP]...
+  python3 t/mutants.py --check     patterns still match, which t/run.sh runs
 
 Each mutant is one exact string replacement in one file. The file is
 rebuilt, the whole suite runs, and the mutant is KILLED if the suite goes
@@ -37,7 +38,13 @@ MUTANTS = [
     ("src", "crlf-pair", "src.go",
      "\t\t\t\tif i < len(in) && in[i] == '\\n' {\n\t\t\t\t\ti++\n\t\t\t\t}",
      "\t\t\t\tif false {\n\t\t\t\t\ti++\n\t\t\t\t}"),
-    ("src", "bom", "src.go", "\t\tin = in[3:]", "\t\tin = in[0:]"),
+    # The BOM mutant used to be "in = in[3:]" and had been dead since
+    # the commit that added UTF-16 and UTF-32 detection moved that code
+    # into sniff(). A mutant whose pattern no longer matches is reported
+    # as PATTERN and is neither killed nor a survivor, so it had stopped
+    # asking its question without ever saying so.
+    ("src", "bom", "src.go",
+     "\t\treturn \"utf8\", 3", "\t\treturn \"utf8\", 0"),
     ("src", "col-counts-bytes", "src.go",
      "\t\t_, w := utf8.DecodeRune(s.b[s.pos:])\n\t\ts.pos += w",
      "\t\ts.pos++"),
@@ -96,11 +103,11 @@ MUTANTS = [
      "\t\t\tif len(breaks) == 0 {\n\t\t\t\tout = append(out, ' ')\n\t\t\t}",
      "\t\t\tout = append(out, ' ')"),
     ("block-scalar", "min-indent-floor", "scalar.go",
-     "\tif minIndent < 1 {\n\t\tminIndent = 1\n\t}", "\tif false {\n\t\tminIndent = 1\n\t}"),
+     "\tif minIndent < floor {\n\t\tminIndent = floor\n\t}", "\tif false {\n\t\tminIndent = floor\n\t}"),
     ("block-scalar", "indicator-offset", "scalar.go",
      "\t\tindent = minIndent + incr - 1", "\t\tindent = minIndent + incr"),
     ("block-scalar", "leading-deep-empty", "scalar.go",
-     "\t\tif maxEmpty > indent {", "\t\tif false && maxEmpty > indent {"),
+     "\t\tif hasContent && maxEmpty > indent {", "\t\tif false && maxEmpty > indent {"),
     ("block-scalar", "cursor-reset", "scalar.go",
      "\tp.reset(lineStart)\n\tif chomp >= 0 {",
      "\tlineStart = p.mark()\n\tp.reset(lineStart)\n\tif chomp >= 0 {"),
@@ -126,7 +133,7 @@ MUTANTS = [
      "\t\t\tif ind <= c.ind {\n\t\t\t\tp.reset(k)\n\t\t\t\treturn false, p.s.errf(\"tab cannot be used for indentation\")\n\t\t\t}",
      ""),
     ("block", "props-split", "parse.go",
-     "\t\tif pr.anchorLine == line {", "\t\tif true {"),
+     "\tif !pr.empty() && pr.line() == line {", "\tif false {"),
     ("block", "compact-map", "parse.go",
      "\t\tif !c.compact {\n\t\t\treturn p.s.errf(\"a %s cannot begin on the same line as the value it belongs to\", what)\n\t\t}",
      ""),
@@ -208,6 +215,44 @@ MUTANTS = [
      "\t\t\tfmt.Fprintf(b, \"float %g\", v.Float)"),
     ("output", "event-style", "node.go",
      "\tcase StSingle:\n\t\treturn \"'\"", "\tcase StSingle:\n\t\treturn \"\\\"\""),
+
+    # --- the rules the YAML test suite settled ---
+    # Each of these is a rule yamlc had wrong until the suite was wired
+    # in as an oracle, so each one is also a check that the suite is
+    # still being asked the question.
+    ("yts", "flow-colon-plain", "flow.go",
+     "\tcase ch == ':' && !plainFirst(ch, p.s.peek(1), true):",
+     "\tcase ch == ':':"),
+    ("yts", "flow-colon-indent", "flow.go",
+     "\tif p.s.line != kl && p.s.col <= ind {",
+     "\tif false {"),
+    ("yts", "comment-needs-blank", "src.go",
+     "\treturn c == ' ' || c == '\\t'",
+     "\treturn true"),
+    ("yts", "blockscalar-root-floor", "scalar.go",
+     "\tfloor := 0\n\tif incr != 0 {\n\t\tfloor = 1\n\t}",
+     "\tfloor := 1\n\tif incr != 0 {\n\t\tfloor = 1\n\t}"),
+    ("yts", "blockscalar-marker", "scalar.go",
+     "\tfor p.s.col == indent && !p.s.eof() && !(p.s.col == 0 && p.atAnyMarker()) {",
+     "\tfor p.s.col == indent && !p.s.eof() {"),
+    ("yts", "blockscalar-eof-break", "scalar.go",
+     "\t\t} else if p.s.eof() {\n\t\t\t// The stream ends with a line break whether or not one is\n\t\t\t// written, so the last content line has one: the suite's\n\t\t\t// L24T/01 against L24T/00, the same document with and\n\t\t\t// without the final newline.\n\t\t\tlineBreak = \"\\n\"",
+     "\t\t} else if p.s.eof() {\n\t\t\tlineBreak = \"\""),
+    ("yts", "blockscalar-no-content", "scalar.go",
+     "\t\thasContent := !p.s.eof() && content > ind",
+     "\t\thasContent := true"),
+    ("yts", "escaped-white-kept", "scalar.go",
+     "\tfor n > keep && isBlank(b[n-1]) {",
+     "\tfor n > 0 && isBlank(b[n-1]) {"),
+    ("yts", "directive-needs-suffix", "parse.go",
+     "\t\t\tif needMarker {\n\t\t\t\treturn nil, p.s.errf(\"a directive needs ... to close the document before it\")\n\t\t\t}",
+     "\t\t\tif false {\n\t\t\t\treturn nil, p.s.errf(\"a directive needs ... to close the document before it\")\n\t\t\t}"),
+    ("yts", "props-group-by-line", "parse.go",
+     "\t\tif pr.empty() || pr.line() == pline {",
+     "\t\tif pr.empty() {"),
+    ("yts", "alias-props-key", "block.go",
+     "\tif n.Kind == KAlias && (n.Anchor != \"\" || n.TagRaw != \"\") {",
+     "\tif false {"),
 ]
 
 
@@ -219,7 +264,32 @@ def run(cmd, **kw):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, **kw)
 
 
+def check():
+    """Every mutant's pattern must appear exactly once in its file.
+
+    A pattern that no longer matches is reported as PATTERN by the run
+    below and is neither killed nor a survivor, so a mutant can quietly
+    stop asking its question when the code it points at is edited. That
+    happened: "in = in[3:]" went dead when UTF-16 and UTF-32 detection
+    moved the byte order mark into sniff(), and nothing said so until
+    four more patterns broke at once. t/run.sh calls this on every run,
+    which costs nothing and is the thing that would have noticed.
+    """
+    bad = 0
+    for group, name, path, old, _ in MUTANTS:
+        with open(os.path.join(ROOT, path)) as f:
+            n = f.read().count(old)
+        if n != 1:
+            bad += 1
+            print("stale %s/%s in %s: pattern appears %d times" % (group, name, path, n))
+    print("mutants %d" % len(MUTANTS))
+    print("stale %d" % bad)
+    return 1 if bad else 0
+
+
 def main(argv):
+    if argv[1:2] == ["--check"]:
+        return check()
     groups = set(argv[1:])
     chosen = [m for m in MUTANTS if not groups or m[0] in groups]
     if not chosen:
