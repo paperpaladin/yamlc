@@ -142,6 +142,18 @@ refuse_only() {
 	esac
 }
 
+# dv NAME FMT EXPECTED -- the kinds and positions yamlc diverge reports.
+# Defined here with the other helpers and not beside the cases that use
+# it: a shell function has to exist before the line that calls it, and
+# this one used to be defined two hundred lines below its first caller.
+# That call printed "dv: not found" into the middle of the run, where it
+# reads as noise from a test rather than as a case that never ran, and
+# the pass count did not change either way because nothing counted it.
+dv() {
+	f=$(doc "$1" "$2")
+	eq "diverge/$1" "$3" "$($Y diverge "$f" 2>&1 | sed -n "s|^$f:||p" | cut -d" " -f1-2 | tr "\n" ";")"
+}
+
 # ev NAME FMT -- the event stream must be identical to PyYAML's. This is the
 # structural oracle and it carries no resolution at all: a plain scalar comes
 # out as a plain scalar whatever its content looks like, so a disagreement
@@ -1178,11 +1190,6 @@ fi
 # The deliverable. Each kind of finding is asserted on a document written
 # to produce exactly that kind, because a report that prints nothing is
 # indistinguishable from a document with nothing in it.
-dv() {
-	f=$(doc "$1" "$2")
-	eq "diverge/$1" "$3" "$($Y diverge "$f" 2>&1 | sed -n "s|^$f:||p" | cut -d" " -f1-2 | tr "\n" ";")"
-}
-
 dv "dv-sexagesimal" 'a: 1:30\n' '1:4: scalar;'
 dv "dv-octal"       'a: 010\n' '1:4: scalar;'
 dv "dv-yes"         'a: yes\n' '1:4: scalar;'
