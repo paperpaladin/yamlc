@@ -1223,7 +1223,14 @@ eq "scalars/quoted-is-quiet"  "2:4  \$.b \"yes | 1.2 str yes | 1.1 str yes" \
 # folded scalars passes having run nothing, so every construct the parser
 # has is counted and every count below has to be non-zero.
 CN=$W/o/counts.out
-$Y counts "$W"/d/* t/corpus/yaml/* t/corpus/hard/*.json > "$CN" || exit 2
+# The test suite's own documents go in too. They are where the thin
+# constructs live: before they were counted, a named tag handle appeared
+# exactly once in everything this suite feeds the parser, and an empty
+# mapping key five times. If the suite data could not be fetched the
+# glob matches nothing and the counts fall back to the rest, which is
+# the same reason the section above prints a skip rather than failing.
+YTS=$(find t/corpus/yts -name in.yaml 2>/dev/null | sort)
+$Y counts "$W"/d/* t/corpus/yaml/* t/corpus/hard/*.json $YTS > "$CN" || exit 2
 cget() { sed -n "s/^$1 //p" "$CN"; }
 echo "corpus: $(cget files.read) documents read, $(cget files.refused) refused, deepest nesting $(cget depth.max)"
 for k in doc doc.explicit doc.bare doc.end-marked directive.yaml \
