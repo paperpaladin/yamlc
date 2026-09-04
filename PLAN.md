@@ -32,18 +32,24 @@ report. A run that cannot tell the two apart has measured nothing.
 
 Ranked by how little of it we control.
 
-1. Python's `json` module, as an exact oracle over the JSON subset. Every
+1. The YAML test suite, the YAML project's own conformance data: 402
+   cases, each with the event stream a conformant parser must produce,
+   the JSON the 1.2 core schema must resolve it to, or a marker saying
+   the document is invalid. Fetched at one pinned tag and hashed by
+   content. It is the only authority here that speaks for YAML 1.2
+   across the whole grammar.
+2. Python's `json` module, as an exact oracle over the JSON subset. Every
    JSON file on the machine plus generated awkward cases: deep nesting,
    duplicate keys, lone surrogates, integers wider than a double, empty
    containers.
-2. PyYAML 6.0.2, which implements YAML 1.1. Used two ways: its event stream
+3. PyYAML 6.0.2, which implements YAML 1.1. Used two ways: its event stream
    from `yaml.parse`, which is about structure and not about schema, and
    `yaml.safe_load`, which is the authority for what the 1.1 resolution rules
    produce. A disagreement is either a 1.1-versus-1.2 difference, which is a
    finding, or a bug in one of the two, which the spec text settles.
-3. The YAML 1.2.2 specification for the resolution rules and for the
+4. The YAML 1.2.2 specification for the resolution rules and for the
    productions. Quoted by section when a decision is not obvious.
-4. Hand-written documents for the cases no generator produces, and for every
+5. Hand-written documents for the cases no generator produces, and for every
    refusal.
 
 ## Non-goals
@@ -183,25 +189,72 @@ Ranked by how little of it we control.
       why: refusing these is part of the contract.
 - [x] construct counts asserted non-zero, printed every run
       why: the vacuous-pass guard.
-- [ ] mutation run over the scanner, survivors recorded
+- [x] mutation run over the scanner, survivors recorded
       why: the suite is worth the mutants it kills and nothing more.
-- [ ] mutation run over the resolution tables, survivors recorded
+- [x] mutation run over the resolution tables, survivors recorded
       why: a resolution table is a list of regexes and a deleted line is
       exactly the defect this project is about.
-- [ ] README with the measured numbers, every disagreement, and what does
+- [x] README with the measured numbers, every disagreement, and what does
       not work
       why: a README that only lists successes is not finished.
+- [x] a pattern check on the mutation list, run by the suite
+      why: five mutants had gone dead, one of them since September, and a
+      mutant whose pattern no longer matches is neither killed nor a
+      survivor, so it stops asking its question in silence.
 
-### Milestone 8: what is still missing
+### Milestone 8: an outside authority for YAML 1.2
 
-- [ ] a second YAML 1.2 implementation as an oracle for the core schema
-      why: eleven assertions take their expected values from the
-      specification's own table and nothing outside this repository checks
-      them. go-yaml v3 is 1.1 with 1.2 pieces and would not settle it; the
-      reference parsers worth trying are libfyaml and the Rust saphyr.
-- [ ] indentation inside a flow collection, decided rather than left lax
-      why: quoted scalars are checked and flow collections are not, and the
-      asymmetry is an accident of which one was measured.
+- [x] an outside authority for the 1.2 grammar and the core schema
+      why: eleven assertions took their expected values from the
+      specification's own table and nothing outside this repository
+      checked them. No second 1.2 implementation is installed here and
+      building one from a downloaded crate is not something to do in
+      passing, but the YAML project publishes its conformance data: 402
+      cases with the expected event stream, the expected JSON, or an
+      error marker. That is the authority, and it is data rather than
+      code.
+- [x] the accept and refuse comparison against the suite's error markers
+      why: a refusal needs an outside authority too, and PyYAML cannot be
+      one for a 1.2 production.
+- [x] the event comparison, byte for byte
+      why: events.go already writes the suite's own shape, so this needs
+      no translation step to be wrong in a way that cancels.
+- [x] the in.json comparison, the core schema oracle
+      why: the hole the README had named since it was written.
+- [x] the thirteen parser defects the suite found, one commit each
+      why: each is a rule this parser had wrong, and a commit per rule is
+      what makes the cause readable later.
+- [x] the test suite's documents through the construct counter
+      why: a named tag handle appeared once in everything the suite fed
+      the parser, which is the range where one document carries a whole
+      assertion.
+- [x] a Go fuzz target with the hostile corpus as its seed
+      why: the byte-level sweep in t/hostile.py is a fixed list of
+      mutations; go test -fuzz is coverage guided and would reach further.
+
+### Milestone 9: the eight cases still wrong, and the rest
+
+- [ ] indentation inside a flow collection, enforced
+      why: test suite case 9C9N is a flow sequence continued at a lesser
+      indentation than the block it sits in, and yamlc reads it. Two
+      places already enforce the rule, both because something made the
+      cost visible; this is the third and the suite now says so.
+- [ ] a block mapping that begins on the --- line, refused
+      why: 9KBC and CXX2. s-l+block-node after a directives-end marker is
+      a compact node, and a block mapping is not one of the forms it may
+      take.
+- [ ] an implicit key with its value on the next line, refused
+      why: ZXT5 and C2SP. A block context implicit key must fit on one
+      line, and the value indicator has to be on that line too.
+- [ ] the three tab positions in Y79Y, refused
+      why: a tab cannot be s-indent, and three of the suite's seven tab
+      cases are places where yamlc lets one stand in for indentation.
+- [ ] 1.1 collection tags, or a decision not to
+      why: !!omap, !!pairs and !!set are the last value disagreement with
+      PyYAML in the whole corpus and the reason 12 of the suite's 279
+      JSON cases are refused rather than compared. "Tags are carried, not
+      dispatched on" is a non-goal that was chosen before either number
+      was measured.
 - [ ] comments kept on the node they follow
       why: the divergence report would be far more useful if it could print
       the comment beside the scalar, and nothing in the node type can hold
@@ -209,10 +262,8 @@ Ranked by how little of it we control.
 - [ ] an iterator over an io.Reader instead of one slice
       why: the whole document is in memory twice, as a parse tree and as a
       value tree, so a file larger than a third of RAM cannot be read.
-- [ ] a Go fuzz target with the hostile corpus as its seed
-      why: the byte-level sweep in t/hostile.py is a fixed list of
-      mutations; go test -fuzz is coverage guided and would reach further.
-- [ ] 1.1 collection tags, or a decision not to
-      why: !!omap, !!pairs and !!set are the last value disagreement with
-      PyYAML in the whole corpus, and "tags are carried, not dispatched on"
-      is a non-goal that was chosen before that was measured.
+- [ ] a second 1.2 implementation, if one can be had without a build
+      why: the test suite settles the grammar and most of the core schema,
+      and it does not settle 0o17, .inf, ~ or Null, which appear in none
+      of its in.json files. Those five spellings are still checked against
+      a table typed in from section 10.2.1.2.
