@@ -1144,12 +1144,24 @@ done
 # is neither killed nor a survivor, so it can go dead between runs and
 # say nothing. Five of them had. Checking the patterns costs nothing and
 # belongs in every run.
-MU=$W/o/mutants.out
-python3 t/mutants.py --check > "$MU" 2>&1
-mget() { sed -n "s/^$1 //p" "$MU"; }
-eq "mutants/stale" "0" "$(mget stale)"
-eq "mutants/enough" "yes" "$([ "$(mget mutants)" -ge 73 ] && echo yes || echo no)"
-grep '^stale ' "$MU" | grep -v '^stale [0-9]*$' || true
+#
+# Not during a mutation run. t/mutants.py sets YAMLC_MUTANT while a
+# mutant is applied, and the mutated source no longer holds that
+# mutant's own pattern, so this check would report stale 1 and fail. It
+# did: five mutants in the first run were recorded as killed by this
+# assertion and by nothing else, which means the gate was killing them
+# rather than the suite. A check that fires on the thing being measured
+# measures itself.
+if [ -n "${YAMLC_MUTANT:-}" ]; then
+	echo "SKIP mutants/stale: a mutant is applied, so its own pattern is gone"
+else
+	MU=$W/o/mutants.out
+	python3 t/mutants.py --check > "$MU" 2>&1
+	mget() { sed -n "s/^$1 //p" "$MU"; }
+	eq "mutants/stale" "0" "$(mget stale)"
+	eq "mutants/enough" "yes" "$([ "$(mget mutants)" -ge 74 ] && echo yes || echo no)"
+	grep '^stale ' "$MU" | grep -v '^stale [0-9]*$' || true
+fi
 
 # --- the YAML test suite ----------------------------------------------
 #

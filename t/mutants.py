@@ -107,7 +107,7 @@ MUTANTS = [
     ("block-scalar", "indicator-offset", "scalar.go",
      "\t\tindent = minIndent + incr - 1", "\t\tindent = minIndent + incr"),
     ("block-scalar", "leading-deep-empty", "scalar.go",
-     "\t\tif hasContent && maxEmpty > indent {", "\t\tif false && maxEmpty > indent {"),
+     "\t\tif hasContent && maxEmpty > indent {", "\t\tif hasContent && maxEmpty < 0 {"),
     ("block-scalar", "cursor-reset", "scalar.go",
      "\tp.reset(lineStart)\n\tif chomp >= 0 {",
      "\tlineStart = p.mark()\n\tp.reset(lineStart)\n\tif chomp >= 0 {"),
@@ -225,10 +225,16 @@ MUTANTS = [
      "\tcase ch == ':':"),
     ("yts", "flow-colon-indent", "flow.go",
      "\tif p.s.line != kl && p.s.col <= ind {",
-     "\tif false {"),
-    ("yts", "comment-needs-blank", "src.go",
-     "\treturn c == ' ' || c == '\\t'",
-     "\treturn true"),
+     "\tif p.s.line != kl && false {"),
+    # Mutated at the two callers rather than in afterBlank itself,
+    # where "return true" leaves c declared and unused and Go refuses to
+    # compile it. A mutant that does not build tests nothing.
+    ("yts", "comment-needs-blank", "parse.go",
+     "\t\t(p.s.peek(0) == '#' && p.s.afterBlank())",
+     "\t\t(p.s.peek(0) == '#')"),
+    ("yts", "comment-needs-blank-flow", "flow.go",
+     "\t\tcase p.s.peek(0) == '#' && p.s.afterBlank():",
+     "\t\tcase p.s.peek(0) == '#':"),
     ("yts", "blockscalar-root-floor", "scalar.go",
      "\tfloor := 0\n\tif incr != 0 {\n\t\tfloor = 1\n\t}",
      "\tfloor := 1\n\tif incr != 0 {\n\t\tfloor = 1\n\t}"),
@@ -261,7 +267,12 @@ def limit():
 
 
 def run(cmd, **kw):
-    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, **kw)
+    # YAMLC_MUTANT tells t/run.sh that a mutant is applied, so that the
+    # pattern check it runs does not fail on the one pattern this mutant
+    # has just edited away. Without it that check fails for every mutant
+    # and reports the whole list as killed by itself.
+    env = dict(os.environ, YAMLC_MUTANT="1")
+    return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, env=env, **kw)
 
 
 def check():
