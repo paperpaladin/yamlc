@@ -403,6 +403,12 @@ ev "lit-explicit-2"  '--- |2\n  x\n'
 # FP8R, DK3J (whose content holds a line that looks like a comment), M7A3
 # and W4TN. PyYAML refuses all four.
 accept_only "lit-root-col0"  '--- >\nline1\nline2\n'
+# A marker on the first line of the content, where the scalar is empty
+# and the document ends. The loop that reads the content has to test for
+# the marker before its first pass as well as after each one, and the
+# mutation run found that only the second test was load-bearing.
+ev "lit-root-empty-then-doc" '--- |\n---\nx\n'
+ev "lit-root-empty-then-end" '--- |\n...\n'
 accept_only "lit-root-hash"  '--- >\nline1\n# no comment\nline3\n'
 eq "lit-root-col0/value" "str line1 line2\\n" \
 	"$($Y dump "$(doc litroot '--- >\nline1\nline2\n')")"
@@ -653,6 +659,13 @@ refuse "dir-no-doc"    '2:1' '%YAML 1.2\nfoo\n'
 # document is a refusal. Suite cases 9HCY, EB22 and RHX7, all three of
 # which yamlc read. "..." before the directive makes all three legal.
 refuse_only "dir-after-doc"  '3:1' '---\nkey: value\n%YAML 1.2\n---\n'
+# The message and not just the position. A "%" at column zero ends the
+# collection above it, and without that the block mapping tries to read
+# the directive as its next key and refuses at the same line and column
+# with a different complaint. Two code paths, one position, so the text
+# is the only thing that tells them apart.
+eq "dir-after-map/message" "2:1: a directive needs ... to close the document before it" \
+	"$($Y check "$(doc dam 'a: 1\n%TAG !e! tag:x,2000:\n---\nb: 2\n')" 2>&1 | sed 's|^.*/dam:||')"
 refuse_only "dir-after-bare" '2:1' '!foo "bar"\n%TAG ! tag:example.com,2000:app/\n---\n!foo "bar"\n'
 accept "dir-after-suffix"  '---\nkey: value\n...\n%YAML 1.2\n---\nk2: v2\n'
 refuse "dir-bare-pct"  '1:1' '%\n--- foo\n'
@@ -669,6 +682,12 @@ accept_only "tab-then-flow-seq" '\t[\n\t]\n'
 # A block collection still needs s-indent, which is spaces.
 refuse "tab-then-block-map" '1:5' '\tfoo: 1\n'
 refuse "tab-then-block-seq" '1:2' '\t- a\n'
+# A tab where the indentation of a nested block collection belongs. The
+# hostile sweep has this document and only asserts that it is refused,
+# which a mutant that deletes the check also satisfies, because another
+# guard refuses it two columns later. The position is what separates
+# them.
+refuse "tab-indent-seq" '2:1' 'a:\n\t- 1\n'
 refuse "unknown-handle" '1:1' '!e!foo x\n'
 refuse "two-anchors"   '1:4' '&a &b x\n'
 # Two groups of properties on two lines are legal when the node turns
