@@ -41,12 +41,14 @@ DIGEST = "54e364c611c649a673c918ce58f708714bc841b898ea9e878afffdc19ff186d6"
 
 CHUNK = 200
 
-# case id -> (kind, cause). kind is "read" for a valid document yamlc
-# refuses, and "refuse" for an invalid one it reads. The cause is what
-# the parser does wrong, in a few words; the README groups them.
+# case id -> (kind, cause). The four kinds are "read" for a valid
+# document yamlc refuses, "refuse" for an invalid one it reads, "event"
+# for an event stream that differs and "json" for a value that does. All
+# eight left are "refuse": there is no valid document in the suite that
+# yamlc cannot read, and no event stream or value that differs. The
+# cause is what the parser does wrong, in a few words; the README groups
+# them and PLAN.md has one item per group.
 KNOWN = {
-
-    # Documents yamlc reads and the suite marks invalid.
     "9C9N": ("refuse", "a flow sequence continued at a lesser indentation"),
     "9KBC": ("refuse", "a block mapping beginning on the --- line"),
     "CXX2": ("refuse", "an anchor on the --- line, then a block mapping"),
