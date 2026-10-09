@@ -156,7 +156,7 @@ Measured on 21 October 2026, on Go 1.24.4, Python 3.13.5 and PyYAML 6.0.2.
 | generated YAML documents holding one | 6 of 1,206, 26 findings |
 | build reproducibility | `unrepro` says reproducible across varied directory, locale, timezone, umask, parallelism and `SOURCE_DATE_EPOCH` |
 | documents the counter saw | 1,905, deepest nesting 391 |
-| mutants | MUTANT_SUMMARY |
+| mutants | 74 applied, 73 killed, 1 equivalent |
 
 Refusals are counted apart from disagreements everywhere, because the two
 need different work. A disagreement is a bug. A refusal where the oracle
@@ -422,8 +422,8 @@ readable, because 1.2 calls NEL printable and not a line break.
 
 ## What the corpus holds
 
-Nothing is committed. `make test` builds all of it, which takes about
-twenty seconds of the suite's thirty.
+Nothing is committed. `make test` builds all of it, and the whole run
+takes a little over half a minute on this machine.
 
 402 cases from the YAML test suite, one pinned tag, fetched once and
 cached under `t/corpus/yts`. 94 of them are documents that must be
@@ -570,7 +570,11 @@ mutation run gets a 6GB address space limit, because two of the mutants
 remove a resource check and the documents those checks exist for would
 otherwise try to build a few hundred million nodes.
 
-MUTANT_RESULT
+73 of the 74 are killed. The one that survives is equivalent: it adds
+an optional leading zero to the 1.2 decimal integer pattern, and
+`^[-+]?0?[0-9]+$` accepts exactly the strings `^[-+]?[0-9]+$` accepts.
+No case can kill it, and it stays in the list with that written down
+rather than being quietly dropped.
 
 Three things from this round are worth more than the number.
 
