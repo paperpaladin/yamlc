@@ -155,7 +155,7 @@ Measured on 21 October 2026, on Go 1.24.4, Python 3.13.5 and PyYAML 6.0.2.
 | JSON files on this machine holding a 1.1 against 1.2 divergence | 2 of 2,714, 302 findings, all of them numbers in exponent form |
 | generated YAML documents holding one | 6 of 1,206, 26 findings |
 | build reproducibility | `unrepro` says reproducible across varied directory, locale, timezone, umask, parallelism and `SOURCE_DATE_EPOCH` |
-| documents the counter saw | 1,905, deepest nesting 391 |
+| documents the counter saw | 1,907, deepest nesting 391 |
 | mutants | 74 applied, 73 killed, 1 equivalent |
 
 Refusals are counted apart from disagreements everywhere, because the two
@@ -468,12 +468,12 @@ from 1 to 7, an empty mapping key from 5 to 30, a collection used as a
 mapping key from 9 to 29, a folded scalar from 13 to 45.
 
 ```
-doc 1935                        doc.explicit 584                doc.bare 1351
-doc.end-marked 225              directive.yaml 18               scalar.plain 64340
+doc 1938                        doc.explicit 587                doc.bare 1351
+doc.end-marked 226              directive.yaml 18               scalar.plain 64341
 scalar.plain.multiline 563      scalar.plain.tab 2              scalar.empty 128
 scalar.single 5635              scalar.single.multiline 55      scalar.double 18669
-scalar.double.multiline 959     scalar.literal 86               scalar.folded 45
-blockscalar.chomp.clip 98       blockscalar.chomp.strip 19      blockscalar.chomp.keep 14
+scalar.double.multiline 959     scalar.literal 88               scalar.folded 45
+blockscalar.chomp.clip 100      blockscalar.chomp.strip 19      blockscalar.chomp.keep 14
 blockscalar.indent.given 19     blockscalar.blank-line 22       block.seq 1994
 block.map 6649                  flow.seq 1796                   flow.map 4210
 collection.empty 893            seq.nested-in-seq 1263          map.key.explicit 230
@@ -482,7 +482,7 @@ anchor 131                      alias 58                        merge.key 16
 tag.primary 22                  tag.secondary 13515             tag.verbatim 7
 tag.non-specific 7              tag.named-handle 7              resolve.1.2.null 364
 resolve.1.2.bool 340            resolve.1.2.int 10868           resolve.1.2.float 90
-resolve.1.2.str 52597           resolve.1.1.timestamp 21        resolve.1.1.merge 18
+resolve.1.2.str 52598           resolve.1.1.timestamp 21        resolve.1.1.merge 18
 resolve.1.1.value 7             diverge.scalar 91               diverge.scalar-refused 2
 diverge.same-tag-other-value 4
 ```
