@@ -696,7 +696,7 @@ before it complained.
 **Columns count characters, and a tab counts as one.** A refusal's column
 will not line up with a terminal's cursor on a line that holds tabs.
 
-**No sanitizer run, and nothing to sanitize.** The C projects in this
+**No sanitizer run, and nothing to sanitise.** The C projects in this
 collection hunt a defect class where a buffer larger than its data turns
 ASan off. Go bounds-checks every slice access and panics rather than
 reading past the end, so that class does not exist here and there is no
